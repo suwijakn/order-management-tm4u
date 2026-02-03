@@ -1,0 +1,228 @@
+erDiagram
+  %% =================================================================
+  %% FIRESTORE NoSQL ERD - Order Management System (v2.0)
+  %% Collections are denormalized for query efficiency
+  %% Document IDs shown with paths: collection/{docId}
+  %% =================================================================
+
+  %% ─────────────────────────────────────────────────────────────────
+  %% USERS COLLECTION: /users/{uid}
+  %% Primary auth collection, referenced by ID in other docs
+  %% ─────────────────────────────────────────────────────────────────
+  USERS {
+    string uid PK "Document ID = Firebase Auth UID"
+    string email "Unique, indexed"
+    string displayName
+    string role "super_admin|manager|sr_sales|jr_sales"
+    boolean emailVerified
+    boolean rememberMe "NEW: Persistent session flag"
+    timestamp sessionExpiresAt "NEW: 30 days if rememberMe=true, else 24hr"
+    timestamp createdAt
+    timestamp lastLoginAt
+  }
+
+  %% ─────────────────────────────────────────────────────────────────
+  %% ORDERS COLLECTION: /orders/{orderId}
+  %% Composite index: (month ASC, status ASC, createdAt DESC)
+  %% Denormalized: createdBy stored as string (not reference)
+  %% ─────────────────────────────────────────────────────────────────
+  ORDERS {
+    string id PK "Document ID (auto-generated)"
+    string month "YYYY-MM format | Indexed for month filtering"
+    string status "active|completed|cancelled | Indexed"
+    int version "Optimistic locking counter | Increment on update"
+    string createdBy "User UID (denormalized, not FK)"
+    string createdByName "Denormalized display name"
+    timestamp createdAt "Indexed for sorting"
+    timestamp updatedAt
+    timestamp deletedAt "Null if active | Soft delete marker"
+    timestamp deletedBy "NEW: User UID who deleted"
+    map dynamic_fields "Flexible schema: {columnKey: value}"
+  }
+
+  %% ─────────────────────────────────────────────────────────────────
+  %% COSTS COLLECTION: /costs/{costId} [NEW]
+  %% Similar structure to ORDERS but for cost rows
+  %% Composite index: (month ASC, status ASC, createdAt DESC)
+  %% Visible only to Manager and Super Admin
+  %% ─────────────────────────────────────────────────────────────────
+  COSTS {
+    string id PK "Document ID (auto-generated)"
+    string month "YYYY-MM format | Indexed for month filtering"
+    string orderId "Optional: Link to specific order"
+    string status "active|completed|cancelled | Indexed"
+    int version "Optimistic locking counter | Increment on update"
+    string createdBy "User UID (denormalized, not FK)"
+    string createdByName "Denormalized display name"
+    timestamp createdAt "Indexed for sorting"
+    timestamp updatedAt
+    timestamp deletedAt "Null if active | Soft delete marker"
+    timestamp deletedBy "User UID who deleted"
+    map dynamic_fields "Flexible schema: {columnKey: value} - same columns as orders"
+  }
+
+  %% ─────────────────────────────────────────────────────────────────
+  %% PENDING_CHANGES COLLECTION: /pending_changes/{changeId}
+  %% Composite index: (status ASC, requestedAt DESC)
+  %% Composite index: (orderId ASC, field ASC, status ASC) for uniqueness check
+  %% Denormalized fields for efficient querying
+  %% UPDATED: Can reference either orders or costs
+  %% ─────────────────────────────────────────────────────────────────
+  PENDING_CHANGES {
+    string id PK "Document ID (auto-generated)"
+    string targetCollection "NEW: 'orders' or 'costs'"
+    string targetId "NEW: Document ID in target collection"
+    string orderId "DEPRECATED: Use targetId instead | Indexed"
+    string orderMonth "Denormalized from order/cost (YYYY-MM)"
+    string field "Column key from dynamic_fields"
+    any baseValue "Snapshot of value at request time"
+    int baseVersion "Order/Cost version at request time"
+    any newValue "Proposed new value"
+    string requestedBy "User UID | Indexed"
+    string requestedByName "Denormalized display name"
+    timestamp requestedAt "Indexed for sorting"
+    string status "pending|approved|rejected|withdrawn | Indexed"
+    timestamp statusUpdatedAt
+    string reviewedBy "Manager UID (null if pending)"
+    int rejectionCount "Incremented on each rejection"
+    timestamp expiresAt "Auto-reject after 7 days"
+  }
+
+  %% ─────────────────────────────────────────────────────────────────
+  %% COLUMN_DEFINITIONS COLLECTION: /column_definitions/{key}
+  %% Document ID = column key (lowercase, unique)
+  %% No FK relationships, referenced by string matching
+  %% UPDATED: Added isDataRelated field
+  %% ─────────────────────────────────────────────────────────────────
+  COLUMN_DEFINITIONS {
+    string key PK "Document ID = unique column identifier"
+    string label "Human-readable name"
+    string type "text|number|date|select"
+    int order "Display order in spreadsheet"
+    array options "For select type: [option1, option2]"
+    boolean systemField "true for id, month, status (non-deletable)"
+    boolean isDataRelated "NEW: true if changes affect data schema (default: true)"
+    timestamp createdAt
+    timestamp updatedAt
+  }
+
+  %% ─────────────────────────────────────────────────────────────────
+  %% ROLE_PERMISSIONS COLLECTION: /role_permissions/{role}
+  %% Document ID = role name (e.g., 'jr_sales')
+  %% Map structure for O(1) column permission lookup
+  %% ─────────────────────────────────────────────────────────────────
+  ROLE_PERMISSIONS {
+    string role PK "Document ID = role name"
+    map permissions "key: {visible: bool, editable: bool, requiresApproval: bool}"
+    timestamp updatedAt
+    string updatedBy "Super Admin UID"
+  }
+
+  %% ─────────────────────────────────────────────────────────────────
+  %% AUDIT_LOGS COLLECTION: /audit_logs/{logId}
+  %% Append-only, no updates allowed by Firestore rules
+  %% Composite index: (userId ASC, timestamp DESC)
+  %% Composite index: (action ASC, timestamp DESC)
+  %% UPDATED: Added actions for recovery and cost operations
+  %% ─────────────────────────────────────────────────────────────────
+  AUDIT_LOGS {
+    string id PK "Document ID (auto-generated)"
+    string userId "Actor UID | Indexed"
+    string userName "Denormalized display name"
+    string action "create|update|delete|approve|reject|withdraw|recover|permanent_delete"
+    string targetCollection "orders|costs|pending_changes|users|etc"
+    string targetId "Document ID of affected resource"
+    map details "Redacted metadata (no sensitive values)"
+    timestamp timestamp "Indexed for time-based queries"
+  }
+
+  %% =================================================================
+  %% RELATIONSHIPS (Logical, not enforced by Firestore)
+  %% NoSQL uses denormalization instead of foreign keys
+  %% =================================================================
+  
+  USERS ||--o{ ORDERS : "createdBy (denormalized UID)"
+  USERS ||--o{ COSTS : "createdBy (denormalized UID)"
+  USERS ||--o{ PENDING_CHANGES : "requestedBy (denormalized UID)"
+  USERS ||--o{ AUDIT_LOGS : "userId (denormalized UID)"
+  
+  ORDERS ||--o{ PENDING_CHANGES : "targetId (logical reference)"
+  COSTS ||--o{ PENDING_CHANGES : "targetId (logical reference)"
+  
+  COLUMN_DEFINITIONS ||--o{ ROLE_PERMISSIONS : "permissions.key matches COLUMN_DEFINITIONS.key"
+
+  %% =================================================================
+  %% INDEXES & CONSTRAINTS (Firestore Rules + Composite Indexes)
+  %% =================================================================
+  %% 
+  %% COMPOSITE INDEXES (must be created in Firebase Console):
+  %% 1. orders: (month ASC, status ASC, createdAt DESC)
+  %% 2. orders: (createdBy ASC, month ASC)
+  %% 3. orders: (deletedAt ASC) - NEW: For soft delete queries
+  %% 4. costs: (month ASC, status ASC, createdAt DESC) - NEW
+  %% 5. costs: (createdBy ASC, month ASC) - NEW
+  %% 6. costs: (deletedAt ASC) - NEW
+  %% 7. pending_changes: (status ASC, requestedAt DESC)
+  %% 8. pending_changes: (targetId ASC, field ASC, status ASC) - UPDATED
+  %% 9. pending_changes: (requestedBy ASC, status ASC)
+  %% 10. audit_logs: (userId ASC, timestamp DESC)
+  %% 11. audit_logs: (action ASC, timestamp DESC)
+  %% 
+  %% FIRESTORE SECURITY RULES CONSTRAINTS:
+  %% - UNIQUE: (targetId, field, status=pending) enforced by query check
+  %% - APPEND-ONLY: audit_logs cannot be updated/deleted
+  %% - VERSION CHECK: orders.version and costs.version must increment by exactly 1
+  %% - SOFT DELETE: deletedAt can only be set, never removed (except via recovery)
+  %% - COST VISIBILITY: costs collection readable only if role in ['manager', 'super_admin']
+  %% - COLUMN EDIT: Type change blocked if isDataRelated=true AND data exists
+  %% 
+  %% =================================================================
+  %% DENORMALIZATION PATTERNS
+  %% =================================================================
+  %% 
+  %% WHY DENORMALIZE?
+  %% - Firestore has no JOINs, so storing related data together avoids multiple reads
+  %% - Example: PENDING_CHANGES stores requestedByName to avoid fetching USERS doc
+  %% 
+  %% DENORMALIZED FIELDS:
+  %% - ORDERS.createdByName (from USERS.displayName)
+  %% - COSTS.createdByName (from USERS.displayName) - NEW
+  %% - PENDING_CHANGES.requestedByName (from USERS.displayName)
+  %% - PENDING_CHANGES.orderMonth (from ORDERS.month or COSTS.month) - UPDATED
+  %% - AUDIT_LOGS.userName (from USERS.displayName)
+  %% 
+  %% CONSISTENCY:
+  %% - If USERS.displayName changes, denormalized copies are NOT updated
+  %% - This is acceptable for display names (historical accuracy)
+  %% - For critical data, store only UID and fetch when needed
+  %% 
+  %% =================================================================
+  %% NEW FEATURES IN v2.0
+  %% =================================================================
+  %% 
+  %% 1. COSTS COLLECTION:
+  %%    - Separate collection for cost rows
+  %%    - Same structure as orders (reuses dynamic_fields schema)
+  %%    - Restricted visibility (Manager + Super Admin only)
+  %%    - Displayed as special row in spreadsheet UI
+  %% 
+  %% 2. SOFT DELETE RECOVERY:
+  %%    - deletedBy field tracks who deleted
+  %%    - Recovery UI allows Manager/Super Admin to restore
+  %%    - Clearing deletedAt makes order/cost active again
+  %% 
+  %% 3. FLEXIBLE COLUMN EDITING:
+  %%    - isDataRelated flag distinguishes schema changes from metadata
+  %%    - isDataRelated=false: Can change order, label even with data
+  %%    - isDataRelated=true: Type changes blocked if data exists
+  %% 
+  %% 4. PERSISTENT SESSIONS:
+  %%    - rememberMe and sessionExpiresAt in USERS collection
+  %%    - 30-day sessions when remember me enabled
+  %%    - 30min idle / 24hr absolute when disabled
+  %% 
+  %% 5. NO MFA REQUIREMENT:
+  %%    - Simplified authentication flow
+  %%    - No separate MFA fields needed
+  %% 
+  %% =================================================================

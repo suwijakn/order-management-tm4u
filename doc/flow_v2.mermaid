@@ -1,0 +1,163 @@
+flowchart TD
+
+  %% --- Classes for styling ---
+  classDef error fill:#fdd,stroke:#d00,stroke-width:2px
+  classDef terminal fill:#fff,stroke:#090,stroke-width:5px
+  classDef new fill:#d4edda,stroke:#28a745,stroke-width:2px
+
+  %% --- Authentication & Entry ---
+  Start@{ shape: stadium, label: "`User Visit`" } --> AuthCheck@{ shape: diamond, label: "`Authenticated?`" }
+  AuthCheck -- No --> Login@{ shape: rect, label: "`Login / Register`" }
+  AuthCheck -- Yes --> SessionValid@{ shape: diamond, label: "`Session Valid?`" }
+  SessionValid -- Expired --> Login
+  SessionValid -- Yes --> FetchUser@{ shape: rect, label: "`Fetch User & Role`" }
+  Login --> RateLimit@{ shape: diamond, label: "`Rate OK?`" }
+  RateLimit -- No --> ShowCaptcha@{ shape: rect, label: "`CAPTCHA`" }
+  ShowCaptcha --> Login
+  RateLimit -- Yes --> RememberMe@{ shape: diamond, label: "`Remember Me?`" }
+  class RememberMe new
+  RememberMe -- Yes --> Set30DaySession@{ shape: rect, label: "`30-day Session`" }
+  class Set30DaySession new
+  RememberMe -- No --> SetShortSession@{ shape: rect, label: "`30min/24hr Session`" }
+  Set30DaySession --> FetchUser
+  SetShortSession --> FetchUser
+
+  %% --- Dashboard & Data Subgraph ---
+  subgraph dashboard ["`Process: Dashboard / Data`"]
+    FetchUser --> SelectDate@{ shape: rect, label: "`Select Month / Year`" }
+    SelectDate --> CacheCheck@{ shape: diamond, label: "`Cache Valid?`" }
+    CacheCheck -- Yes --> RenderGrid@{ shape: rect, label: "`Render Sheet`" }
+    CacheCheck -- No --> LoadData@{ shape: rect, label: "`Load Firestore`" }
+    LoadData --> ConnStatus@{ shape: diamond, label: "`Connected?`" }
+    ConnStatus -- No --> Reconnect@{ shape: rect, label: "`Reconnect`" }
+    Reconnect --> LoadData
+    ConnStatus -- Yes --> LoadCosts@{ shape: diamond, label: "`Manager/Admin?`" }
+    class LoadCosts new
+    LoadCosts -- Yes --> FetchCosts@{ shape: rect, label: "`Fetch Costs Row`" }
+    class FetchCosts new
+    LoadCosts -- No --> RenderGrid
+    FetchCosts --> RenderGrid
+  end
+
+  RenderGrid --> UserAction@{ shape: diamond, label: "`Action?`" }
+
+  %% --- Edit Cell Subgraph ---
+  subgraph editcell ["`Process: Edit Cell`"]
+    UserAction -- Edit --> IsCostRow@{ shape: diamond, label: "`Cost Row?`" }
+    class IsCostRow new
+    IsCostRow -- Yes --> CanEditCost@{ shape: diamond, label: "`Manager/Admin?`" }
+    class CanEditCost new
+    CanEditCost -- No --> ReadOnly@{ shape: rect, label: "`Read Only`" }
+    class ReadOnly error
+    CanEditCost -- Yes --> OrderActive
+    IsCostRow -- No --> OrderActive@{ shape: diamond, label: "`Order Active?`" }
+    OrderActive -- No --> ReadOnly
+    OrderActive -- Yes --> HasPending@{ shape: diamond, label: "`Cell Pending?`" }
+    HasPending -- Yes --> IsOwner@{ shape: diamond, label: "`Mine?`" }
+    IsOwner -- Yes --> WithdrawOpt@{ shape: rect, label: "`Withdraw?`" }
+    WithdrawOpt --> Withdraw@{ shape: rect, label: "`Withdrawn`" }
+    class Withdraw error
+    IsOwner -- No --> Locked@{ shape: rect, label: "`Locked`" }
+    class Locked error
+    HasPending -- No --> CanEdit@{ shape: diamond, label: "`Can Edit?`" }
+    CanEdit -- No --> ReadOnly
+    CanEdit -- Yes --> ValidInput@{ shape: diamond, label: "`Input OK?`" }
+    ValidInput -- No --> ValidationErr@{ shape: rect, label: "`Type Error`" }
+    class ValidationErr error
+    ValidInput -- Yes --> NeedsApproval@{ shape: diamond, label: "`Needs Approval?`" }
+    NeedsApproval -- No --> CheckVersion@{ shape: diamond, label: "`Ver Match?`" }
+    CheckVersion -- No --> Conflict@{ shape: rect, label: "`Conflict`" }
+    class Conflict error
+    CheckVersion -- Yes --> DirectUpdate@{ shape: rect, label: "`Update`" }
+    NeedsApproval -- Yes --> CheckRate@{ shape: diamond, label: "`Rate OK?`" }
+    CheckRate -- No --> RateDenied@{ shape: rect, label: "`Rate Limit`" }
+    class RateDenied error
+    CheckRate -- Yes --> CreatePending@{ shape: rect, label: "`Create Pending`" }
+  end
+
+  %% --- Add/Delete Row (Manager) ---
+  UserAction -- "Add Row" --> IsManager@{ shape: diamond, label: "`Manager?`" }
+  UserAction -- "Delete Row" --> IsManager
+  IsManager -- No --> Denied@{ shape: rect, label: "`Denied`" }
+  class Denied error
+  IsManager -- Yes --> AddOrDel@{ shape: diamond, label: "`Row Action?`" }
+  AddOrDel -- "Add Row" --> CreateRow@{ shape: rect, label: "`Create Order`" }
+  AddOrDel -- "Delete Row" --> ForceConfirm@{ shape: diamond, label: "`Force Delete?`" }
+  ForceConfirm -- Yes --> SoftDelete@{ shape: rect, label: "`Soft Delete`" }
+  ForceConfirm -- No --> HasPendingRow@{ shape: diamond, label: "`Has Pending?`" }
+  HasPendingRow -- Yes --> BlockDel@{ shape: rect, label: "`Blocked`" }
+  class BlockDel error
+  HasPendingRow -- No --> SoftDelete
+
+  %% --- Soft Delete Recovery (NEW) ---
+  UserAction -- "Recover Deleted" --> IsManagerRecover@{ shape: diamond, label: "`Manager/Admin?`" }
+  class IsManagerRecover new
+  IsManagerRecover -- No --> Denied
+  IsManagerRecover -- Yes --> ViewDeleted@{ shape: rect, label: "`View Deleted Orders`" }
+  class ViewDeleted new
+  ViewDeleted --> RecoverAction@{ shape: diamond, label: "`Action?`" }
+  class RecoverAction new
+  RecoverAction -- "Recover" --> ClearDeletedAt@{ shape: rect, label: "`Clear deletedAt`" }
+  class ClearDeletedAt new
+  RecoverAction -- "Permanent Delete" --> ConfirmPermanent@{ shape: diamond, label: "`Confirm?`" }
+  class ConfirmPermanent new
+  ConfirmPermanent -- Yes --> PermanentDelete@{ shape: rect, label: "`Delete Forever`" }
+  class PermanentDelete new
+  ConfirmPermanent -- No --> ViewDeleted
+
+  %% --- Approval Process Subgraph ---
+  subgraph approval ["`Process: Approvals`"]
+    UserAction -- "Review Pending" --> CheckExpired@{ shape: diamond, label: "`Expired?`" }
+    CheckExpired -- Yes --> AutoReject@{ shape: rect, label: "`Auto-Reject`" }
+    AutoReject --> Log
+    CheckExpired -- No --> CheckBase@{ shape: diamond, label: "`Value Match?`" }
+    CheckBase -- No --> ShowConflict@{ shape: rect, label: "`Changed!`" }
+    class ShowConflict error
+    CheckBase -- Yes --> Decision@{ shape: diamond, label: "`Approve?`" }
+    Decision -- Yes --> ApplyChange@{ shape: rect, label: "`Apply`" }
+    Decision -- No --> MarkRejected@{ shape: rect, label: "`Reject`" }
+  end
+
+  %% --- Column Management (Super Admin) Subgraph ---
+  subgraph columns ["`Process: Manage Columns`"]
+    UserAction -- "Manage Columns" --> IsSuperAdmin@{ shape: diamond, label: "`Super Admin?`" }
+    IsSuperAdmin -- Yes --> ColAction@{ shape: diamond, label: "`Col Action?`" }
+    ColAction -- "Add" --> AddCol@{ shape: rect, label: "`Add Col`" }
+    ColAction -- "Edit" --> IsDataRelated@{ shape: diamond, label: "`isDataRelated?`" }
+    class IsDataRelated new
+    IsDataRelated -- No --> EditCol@{ shape: rect, label: "`Edit Col`" }
+    class EditCol new
+    IsDataRelated -- Yes --> HasData@{ shape: diamond, label: "`Data Exists?`" }
+    HasData -- Yes --> BlockType@{ shape: rect, label: "`Type Blocked`" }
+    class BlockType error
+    HasData -- No --> EditCol
+    ColAction -- "Delete" --> DelCol@{ shape: rect, label: "`Delete Col`" }
+    IsSuperAdmin -- No --> Denied
+  end
+
+  %% --- Permissions (2 Admins) Subgraph ---
+  subgraph permissions ["`Process: Permissions`"]
+    UserAction -- "Config Perms" --> TwoPersonCheck@{ shape: diamond, label: "`2nd Admin OK?`" }
+    TwoPersonCheck -- Yes --> UpdatePerms@{ shape: rect, label: "`Update Perm`" }
+    TwoPersonCheck -- No --> RequestApproval@{ shape: rect, label: "`Request Approval`" }
+  end
+
+  %% --- Audit Logging / Feedback Loop ---
+  DirectUpdate --> Log@{ shape: cyl, label: "`Audit Log`" }
+  CreatePending --> Log
+  Withdraw --> Log
+  CreateRow --> Log
+  SoftDelete --> Log
+  ClearDeletedAt --> Log
+  PermanentDelete --> Log
+  ApplyChange --> Log
+  MarkRejected --> Log
+  AddCol --> Log
+  EditCol --> Log
+  DelCol --> Log
+  UpdatePerms --> Log
+
+  Log ==> End@{ shape: "dbl-circ", label: "`End`" }
+  class End terminal
+
+  Log --> LoadData
