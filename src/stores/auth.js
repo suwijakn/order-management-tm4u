@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, watch } from "vue";
+import { computed } from "vue";
 import { useAuth } from "@/composables/useAuth";
 
 export const useAuthStore = defineStore("auth", () => {
@@ -12,6 +12,8 @@ export const useAuthStore = defineStore("auth", () => {
     register: authRegister,
     logout: authLogout,
     initAuthListener,
+    isEmailVerified,
+    sendVerificationEmail,
   } = useAuth();
 
   // Getters
@@ -25,13 +27,28 @@ export const useAuthStore = defineStore("auth", () => {
       "",
   );
   const userRole = computed(() => currentUser.value?.role || "user");
+  const emailVerified = computed(() => isEmailVerified());
 
   // Actions
+  function setUser(userData) {
+    user.value = userData;
+    error.value = null;
+  }
+
+  function setLoading(isLoading) {
+    loading.value = isLoading;
+  }
+
   function setError(errorMessage) {
     error.value = errorMessage;
   }
 
   function clearError() {
+    error.value = null;
+  }
+
+  function clearUser() {
+    user.value = null;
     error.value = null;
   }
 
@@ -61,8 +78,13 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
-  // Initialize auth listener when store is created
-  initAuthListener();
+  async function resendVerificationEmail() {
+    try {
+      await sendVerificationEmail();
+    } catch (err) {
+      throw err;
+    }
+  }
 
   return {
     // State
@@ -74,11 +96,16 @@ export const useAuthStore = defineStore("auth", () => {
     userEmail,
     userName,
     userRole,
+    emailVerified,
     // Actions
+    setUser,
+    setLoading,
     setError,
     clearError,
+    clearUser,
     login,
     logout,
     register,
+    resendVerificationEmail,
   };
 });
