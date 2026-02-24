@@ -35,10 +35,15 @@ export const useAuthStore = defineStore("auth", () => {
     error.value = null;
   }
 
+<<<<<<< /Users/suwijakn/Desktop/Source/tm4u/src/stores/auth.js
   // Fixed: Consolidated into one correct async function
   async function login(email, password, rememberMe = false) {
     try {
       // Ensure your composable's authLogin accepts the rememberMe argument
+=======
+  async function login(email, password, rememberMe = false) {
+    try {
+>>>>>>> /Users/suwijakn/.windsurf/worktrees/tm4u/tm4u-8967a45c/src/stores/auth.js
       const user = await authLogin(email, password, rememberMe);
       return user;
     } catch (err) {
@@ -83,4 +88,8 @@ export const useAuthStore = defineStore("auth", () => {
     logout,
     register,
   };
+<<<<<<< /Users/suwijakn/Desktop/Source/tm4u/src/stores/auth.js
 });
+=======
+});
+>>>>>>> /Users/suwijakn/.windsurf/worktrees/tm4u/tm4u-8967a45c/src/stores/auth.js
