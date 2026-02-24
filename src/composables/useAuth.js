@@ -19,6 +19,12 @@ const error = ref(null);
 
 let unsubscribe = null;
 
+// Promise that resolves when Firebase finishes restoring auth state
+let authReadyResolve = null;
+const authReady = new Promise((resolve) => {
+  authReadyResolve = resolve;
+});
+
 // Rate limiting constants (T-AUTH-002: 5 attempts/15min)
 const RATE_LIMIT_MAX_ATTEMPTS = 5;
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
@@ -41,9 +47,23 @@ export function useAuth() {
         currentUser.value = user;
         loading.value = false;
 
-        // Check session validity on auth state change
+        // Resolve authReady on first callback
+        if (authReadyResolve) {
+          authReadyResolve();
+          authReadyResolve = null;
+        }
+
         if (user) {
-          checkSessionValidity();
+          // If Firebase restored the session but no local session info exists,
+          // recreate it (e.g. user reopened tab with "remember me")
+          const sessionData = localStorage.getItem(SESSION_STORAGE_KEY);
+          if (!sessionData) {
+            // Firebase persisted this session, so it was a "remember me" login
+            createSessionInfo(true);
+          } else {
+            // Check session validity for existing sessions
+            checkSessionValidity();
+          }
         }
       },
       (err) => {
@@ -337,5 +357,7 @@ export function useAuth() {
     // Session management exports
     updateSessionActivity,
     checkSessionValidity,
+    // Auth ready promise
+    authReady,
   };
 }
