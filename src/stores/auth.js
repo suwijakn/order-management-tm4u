@@ -1,75 +1,68 @@
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { defineStore } from "pinia";
+import { computed, watch } from "vue";
+import { useAuth } from "@/composables/useAuth";
 
-export const useAuthStore = defineStore('auth', () => {
-  // State
-  const user = ref(null)
-  const loading = ref(false)
-  const error = ref(null)
+export const useAuthStore = defineStore("auth", () => {
+  // Use the auth composable
+  const {
+    currentUser,
+    loading,
+    error,
+    login: authLogin,
+    register: authRegister,
+    logout: authLogout,
+    initAuthListener,
+  } = useAuth();
 
   // Getters
-  const isAuthenticated = computed(() => !!user.value)
-  const userEmail = computed(() => user.value?.email || '')
-  const userName = computed(() => user.value?.displayName || user.value?.email?.split('@')[0] || '')
-  const userRole = computed(() => user.value?.role || 'user')
+  const user = computed(() => currentUser.value);
+  const isAuthenticated = computed(() => !!currentUser.value);
+  const userEmail = computed(() => currentUser.value?.email || "");
+  const userName = computed(
+    () =>
+      currentUser.value?.displayName ||
+      currentUser.value?.email?.split("@")[0] ||
+      "",
+  );
+  const userRole = computed(() => currentUser.value?.role || "user");
 
   // Actions
-  function setUser(userData) {
-    user.value = userData
-    error.value = null
-  }
-
-  function setLoading(isLoading) {
-    loading.value = isLoading
-  }
-
   function setError(errorMessage) {
-    error.value = errorMessage
+    error.value = errorMessage;
   }
 
-  function clearUser() {
-    user.value = null
-    error.value = null
+  function clearError() {
+    error.value = null;
   }
 
-  async function login(email, password) {
-    // TODO: Implement Firebase Auth login
-    setLoading(true)
+  async function login(email, password, rememberMe = false) {
     try {
-      // Placeholder for Firebase Auth
-      console.log('Login attempt:', email)
-      setError(null)
+      const user = await authLogin(email, password, rememberMe);
+      return user;
     } catch (err) {
-      setError(err.message)
-      throw err
-    } finally {
-      setLoading(false)
+      throw err;
     }
   }
 
   async function logout() {
-    // TODO: Implement Firebase Auth logout
-    setLoading(true)
     try {
-      clearUser()
-    } finally {
-      setLoading(false)
+      await authLogout();
+    } catch (err) {
+      throw err;
     }
   }
 
   async function register(email, password, displayName) {
-    // TODO: Implement Firebase Auth registration
-    setLoading(true)
     try {
-      console.log('Register attempt:', email, displayName)
-      setError(null)
+      const user = await authRegister(email, password, displayName);
+      return user;
     } catch (err) {
-      setError(err.message)
-      throw err
-    } finally {
-      setLoading(false)
+      throw err;
     }
   }
+
+  // Initialize auth listener when store is created
+  initAuthListener();
 
   return {
     // State
@@ -82,12 +75,10 @@ export const useAuthStore = defineStore('auth', () => {
     userName,
     userRole,
     // Actions
-    setUser,
-    setLoading,
     setError,
-    clearUser,
+    clearError,
     login,
     logout,
-    register
-  }
-})
+    register,
+  };
+});
