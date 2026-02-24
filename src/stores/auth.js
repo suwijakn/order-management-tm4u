@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, watch } from "vue";
+import { computed } from "vue";
 import { useAuth } from "@/composables/useAuth";
 
 export const useAuthStore = defineStore("auth", () => {
@@ -12,6 +12,8 @@ export const useAuthStore = defineStore("auth", () => {
     register: authRegister,
     logout: authLogout,
     initAuthListener,
+    isEmailVerified,
+    sendVerificationEmail,
   } = useAuth();
 
   // Getters
@@ -25,8 +27,18 @@ export const useAuthStore = defineStore("auth", () => {
       "",
   );
   const userRole = computed(() => currentUser.value?.role || "user");
+  const emailVerified = computed(() => isEmailVerified());
 
   // Actions
+  function setUser(userData) {
+    user.value = userData;
+    error.value = null;
+  }
+
+  function setLoading(isLoading) {
+    loading.value = isLoading;
+  }
+
   function setError(errorMessage) {
     error.value = errorMessage;
   }
@@ -35,15 +47,13 @@ export const useAuthStore = defineStore("auth", () => {
     error.value = null;
   }
 
-<<<<<<< /Users/suwijakn/Desktop/Source/tm4u/src/stores/auth.js
-  // Fixed: Consolidated into one correct async function
+  function clearUser() {
+    user.value = null;
+    error.value = null;
+  }
+
   async function login(email, password, rememberMe = false) {
     try {
-      // Ensure your composable's authLogin accepts the rememberMe argument
-=======
-  async function login(email, password, rememberMe = false) {
-    try {
->>>>>>> /Users/suwijakn/.windsurf/worktrees/tm4u/tm4u-8967a45c/src/stores/auth.js
       const user = await authLogin(email, password, rememberMe);
       return user;
     } catch (err) {
@@ -68,8 +78,13 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
-  // Initialize auth listener when store is created
-  initAuthListener();
+  async function resendVerificationEmail() {
+    try {
+      await sendVerificationEmail();
+    } catch (err) {
+      throw err;
+    }
+  }
 
   return {
     // State
@@ -81,15 +96,16 @@ export const useAuthStore = defineStore("auth", () => {
     userEmail,
     userName,
     userRole,
+    emailVerified,
     // Actions
+    setUser,
+    setLoading,
     setError,
     clearError,
+    clearUser,
     login,
     logout,
     register,
+    resendVerificationEmail,
   };
-<<<<<<< /Users/suwijakn/Desktop/Source/tm4u/src/stores/auth.js
 });
-=======
-});
->>>>>>> /Users/suwijakn/.windsurf/worktrees/tm4u/tm4u-8967a45c/src/stores/auth.js

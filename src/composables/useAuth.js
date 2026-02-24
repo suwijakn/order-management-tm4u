@@ -53,6 +53,25 @@ export function useAuth() {
     );
   }
 
+  // Check if user email is verified
+  function isEmailVerified() {
+    return currentUser.value?.emailVerified || false;
+  }
+
+  // Send verification email
+  async function sendVerificationEmail() {
+    if (!currentUser.value) {
+      throw new Error("No user logged in");
+    }
+
+    try {
+      await sendEmailVerification(currentUser.value);
+    } catch (err) {
+      error.value = getAuthErrorMessage(err.code);
+      throw err;
+    }
+  }
+
   // Cleanup auth state listener
   function cleanupAuthListener() {
     if (unsubscribe) {
@@ -307,6 +326,9 @@ export function useAuth() {
     logout,
     initAuthListener,
     cleanupAuthListener,
+    // Email verification exports
+    isEmailVerified,
+    sendVerificationEmail,
     // Rate limiting exports
     checkRateLimit,
     recordFailedAttempt,
