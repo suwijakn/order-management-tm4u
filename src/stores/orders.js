@@ -5,6 +5,7 @@ import {
   doc,
   query,
   where,
+  orderBy,
   onSnapshot,
   addDoc,
   serverTimestamp,
@@ -114,7 +115,11 @@ export const useOrdersStore = defineStore("orders", () => {
     error.value = null;
     orders.value = {};
 
-    const q = query(collection(db, "orders"), where("month", "==", month));
+    const q = query(
+      collection(db, "orders"),
+      where("month", "==", month),
+      orderBy("createdAt", "desc"),
+    );
 
     unsubscribeListener = onSnapshot(
       q,
