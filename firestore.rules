@@ -1,0 +1,508 @@
+rules_version = '2';
+
+// =============================================================================
+// FIRESTORE SECURITY RULES - Order Management System
+// =============================================================================
+// Based on: threat_model_v2.md (v2.1) and firestore_erd_v2.mermaid
+//
+// Trust Boundary: These rules are the PRIMARY security enforcement layer.
+// The Vue client is UNTRUSTED (T-AUTHZ-001).
+// ALL authorization checks MUST be enforced here, not in client code.
+//
+// Threat coverage:
+//   T-AUTH-001    Session hijacking          → Firebase Auth token validation
+//   T-AUTHZ-001  Client-side auth bypass     → All checks server-side here
+//   T-AUTHZ-002  Self role escalation        → Block self-role modification
+//   T-AUTHZ-003  Horizontal privilege        → Ownership / role checks
+//   T-AUTHZ-004  Permission config tampering → 2nd Super Admin approval
+//   T-AUTHZ-005  Cost data leak              → Role-gated read on costs
+//   T-DATA-001   Race condition (lost update) → Optimistic locking (version)
+//   T-DATA-002   Pending approval race       → Uniqueness constraint
+//   T-DATA-005   Column type change corrupt  → Block if isDataRelated + data
+//   T-DATA-007   Audit log tampering         → Append-only
+//   T-DATA-009   Accidental permanent loss   → Soft delete only
+//   T-LOGIC-001  Completed order bypass      → Block writes on completed
+//   T-DOS-002    Pending queue flood         → Max unresolved limit
+//   T-DOS-003    Malicious column creation   → Hard limit 100 columns
+//   T-INFO-001   Sensitive data in audit     → Super Admin read only
+// =============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // HELPER FUNCTIONS
+    // =========================================================================
+
+    // --- Authentication helpers ---
+
+    // Returns true if the request is from an authenticated user
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Returns the UID of the authenticated user
+    function userId() {
+      return request.auth.uid;
+    }
+
+    // Returns the custom claim role of the authenticated user.
+    // Roles: super_admin, manager, sr_sales, jr_sales
+    // Custom claims must be set via Firebase Admin SDK (Cloud Functions).
+    function userRole() {
+      return request.auth.token.role;
+    }
+
+    // --- Role check helpers ---
+
+    function isSuperAdmin() {
+      return isAuthenticated() && userRole() == 'super_admin';
+    }
+
+    function isManager() {
+      return isAuthenticated() && userRole() == 'manager';
+    }
+
+    function isManagerOrAbove() {
+      return isAuthenticated() && userRole() in ['manager', 'super_admin'];
+    }
+
+    // --- Data helpers ---
+
+    // Returns the incoming (new) data from the write request
+    function incomingData() {
+      return request.resource.data;
+    }
+
+    // Returns the existing data in the document before the write
+    function existingData() {
+      return resource.data;
+    }
+
+    // Check if a specific field changed between existing and incoming data
+    function fieldChanged(field) {
+      return incomingData()[field] != existingData()[field];
+    }
+
+    // Returns true if incoming data has all required keys
+    function hasAllFields(fields) {
+      return incomingData().keys().hasAll(fields);
+    }
+
+    // Returns true if incoming data ONLY contains the specified keys
+    function hasOnlyFields(fields) {
+      return incomingData().keys().hasOnly(fields);
+    }
+
+    // --- Version control helper (T-DATA-001) ---
+    // Enforces optimistic locking: version must increment by exactly 1
+    function validVersionIncrement() {
+      return incomingData().version == existingData().version + 1;
+    }
+
+    // --- Soft delete helpers (T-DATA-009) ---
+    // Ensures deletedAt can be set (soft delete) but never removed,
+    // except during recovery by Manager+.
+    function isSoftDeleteOnly() {
+      // If document currently has deletedAt set, it cannot be unset
+      // (recovery is handled separately by isRecovery)
+      return !('deletedAt' in existingData()) || existingData().deletedAt == null
+          || incomingData().deletedAt != null;
+    }
+
+    function isRecovery() {
+      // Recovery: clearing deletedAt — only Manager+ can do this
+      return existingData().deletedAt != null
+          && incomingData().deletedAt == null
+          && isManagerOrAbove();
+    }
+
+    // --- Timestamp helper ---
+    function isValidTimestamp(field) {
+      return incomingData()[field] is timestamp;
+    }
+
+
+    // =========================================================================
+    // 1. USERS COLLECTION: /users/{uid}
+    // =========================================================================
+    // - Users can read their own document
+    // - Only Super Admin can write to any user document
+    // - Block self-role modification (T-AUTHZ-002)
+    // - Mitigates: T-AUTHZ-001, T-AUTHZ-002, T-AUTHZ-003
+    // =========================================================================
+    match /users/{uid} {
+
+      // Users can only read their own document (T-AUTHZ-003)
+      // Super Admin can read any user document (for user management)
+      allow read: if isAuthenticated()
+                  && (userId() == uid || isSuperAdmin());
+
+      // Only Super Admin can create user documents
+      allow create: if isSuperAdmin()
+                    && hasAllFields(['email', 'role', 'createdAt'])
+                    && incomingData().role in ['super_admin', 'manager', 'sr_sales', 'jr_sales'];
+
+      // Only Super Admin can update user documents
+      // T-AUTHZ-002: A Super Admin CANNOT change their OWN role
+      // This prevents self-escalation and ensures another admin must act.
+      allow update: if isSuperAdmin()
+                    && (
+                      // If role is being changed, the target must NOT be the requester
+                      !fieldChanged('role')
+                      || userId() != uid
+                    )
+                    // Validate role value if it's being changed
+                    && (!fieldChanged('role')
+                        || incomingData().role in ['super_admin', 'manager', 'sr_sales', 'jr_sales']);
+
+      // Users can never be permanently deleted via client
+      // Account deactivation is handled by Super Admin setting a flag
+      allow delete: if false;
+    }
+
+
+    // =========================================================================
+    // 2. ORDERS COLLECTION: /orders/{orderId}
+    // =========================================================================
+    // - Read: All authenticated users (column visibility enforced client-side
+    //         via role_permissions; Firestore cannot filter map sub-fields)
+    // - Write: Version increment required (T-DATA-001)
+    // - Block writes if status === 'completed' (T-LOGIC-001)
+    // - Soft delete only (T-DATA-009): can set deletedAt, cannot remove it
+    // - Recovery: Manager+ can clear deletedAt to restore
+    // - Mitigates: T-DATA-001, T-LOGIC-001, T-DATA-009, T-AUTHZ-001
+    // =========================================================================
+    match /orders/{orderId} {
+
+      // All authenticated users can read orders
+      // Column-level visibility is enforced client-side using role_permissions
+      // (Firestore rules cannot filter individual map keys within dynamic_fields)
+      allow read: if isAuthenticated();
+
+      // Create: Any authenticated user can create an order
+      // Must include required fields and start at version 1
+      allow create: if isAuthenticated()
+                    && hasAllFields(['month', 'status', 'version', 'createdBy', 'createdAt'])
+                    && incomingData().version == 1
+                    && incomingData().createdBy == userId()
+                    && incomingData().status in ['active', 'completed', 'cancelled']
+                    && incomingData().deletedAt == null;
+
+      // Update: Authenticated users with version control
+      // T-DATA-001: Version must increment by exactly 1 (optimistic locking)
+      // T-LOGIC-001: Cannot update a completed order
+      // T-DATA-009: Soft delete — deletedAt can be set but not removed (except recovery)
+      allow update: if isAuthenticated()
+                    && validVersionIncrement()
+                    // T-LOGIC-001: Block writes to completed orders
+                    // (unless we are soft-deleting or recovering — those are status-neutral)
+                    && (existingData().status != 'completed'
+                        || incomingData().deletedAt != existingData().deletedAt)
+                    // T-DATA-009: Enforce soft delete / recovery rules
+                    && (isSoftDeleteOnly() || isRecovery())
+                    // If setting deletedAt, must also set deletedBy to current user
+                    && (
+                      incomingData().deletedAt == null
+                      || incomingData().deletedAt == existingData().deletedAt
+                      || incomingData().deletedBy == userId()
+                    )
+                    // updatedAt must be a server timestamp
+                    && incomingData().updatedAt == request.time;
+
+      // Hard delete is NEVER allowed from client (T-DATA-009)
+      // Permanent deletion should only happen via Cloud Functions after 30 days
+      allow delete: if false;
+    }
+
+
+    // =========================================================================
+    // 3. COSTS COLLECTION: /costs/{costId} [NEW]
+    // =========================================================================
+    // - Read: ONLY Manager and Super Admin (T-AUTHZ-005)
+    //   Jr/Sr Sales must NOT be able to read cost data, even via direct API
+    // - Write: Same version control as orders (T-DATA-001)
+    // - Same soft delete rules as orders (T-DATA-009)
+    // - Mitigates: T-AUTHZ-005, T-DATA-001, T-LOGIC-001, T-DATA-009
+    // =========================================================================
+    match /costs/{costId} {
+
+      // T-AUTHZ-005: Cost data is restricted to Manager and Super Admin ONLY
+      // This prevents Jr/Sr Sales from accessing cost data even via direct
+      // Firestore API calls (Attack Scenario 3 in threat model)
+      allow read: if isManagerOrAbove();
+
+      // Create: Only Manager+ can create cost entries
+      allow create: if isManagerOrAbove()
+                    && hasAllFields(['month', 'status', 'version', 'createdBy', 'createdAt'])
+                    && incomingData().version == 1
+                    && incomingData().createdBy == userId()
+                    && incomingData().status in ['active', 'completed', 'cancelled']
+                    && incomingData().deletedAt == null;
+
+      // Update: Same rules as orders but restricted to Manager+
+      // T-DATA-001: Version must increment by exactly 1
+      // T-LOGIC-001: Cannot update completed cost entries
+      // T-DATA-009: Soft delete only
+      allow update: if isManagerOrAbove()
+                    && validVersionIncrement()
+                    && (existingData().status != 'completed'
+                        || incomingData().deletedAt != existingData().deletedAt)
+                    && (isSoftDeleteOnly() || isRecovery())
+                    && (
+                      incomingData().deletedAt == null
+                      || incomingData().deletedAt == existingData().deletedAt
+                      || incomingData().deletedBy == userId()
+                    )
+                    && incomingData().updatedAt == request.time;
+
+      // Hard delete is NEVER allowed from client (T-DATA-009)
+      allow delete: if false;
+    }
+
+
+    // =========================================================================
+    // 4. PENDING_CHANGES COLLECTION: /pending_changes/{changeId}
+    // =========================================================================
+    // - Enforce uniqueness: one pending per (targetId, field, status='pending')
+    //   (T-DATA-002: Pending approval race)
+    // - Users can only create pendings for fields they have edit permission on
+    // - Only managers can approve/reject
+    // - Mitigates: T-DATA-002, T-AUTHZ-001, T-AUTHZ-003, T-DOS-002
+    //
+    // NOTE: True uniqueness enforcement and permission-per-field checks
+    // require reading other documents (role_permissions). Firestore rules
+    // can only do limited cross-document reads via get()/exists().
+    // Complex validations (uniqueness query, field-level permissions) are
+    // best enforced in Cloud Functions with transactions.
+    // The rules below enforce what is possible at the rules layer.
+    // =========================================================================
+    match /pending_changes/{changeId} {
+
+      // Read: Authenticated users can read pending changes
+      // (filtered client-side by role; managers see all, users see own)
+      // Cost-related pendings: only Manager+ can read (T-AUTHZ-005)
+      allow read: if isAuthenticated()
+                  && (
+                    // Non-cost pendings: anyone authenticated can read
+                    existingData().targetCollection != 'costs'
+                    // Cost pendings: only Manager+
+                    || isManagerOrAbove()
+                  );
+
+      // Create: Authenticated users can create pending changes
+      // T-DATA-002: Uniqueness (targetId + field + status=pending) enforced
+      //   via Cloud Function transaction — rules enforce basic structure.
+      // T-DOS-002: Rate limiting (20/hour/user, max 50 unresolved) enforced
+      //   via Cloud Function — rules enforce required fields.
+      allow create: if isAuthenticated()
+                    && hasAllFields([
+                      'targetCollection', 'targetId', 'field',
+                      'baseValue', 'baseVersion', 'newValue',
+                      'requestedBy', 'requestedByName', 'requestedAt',
+                      'status', 'expiresAt'
+                    ])
+                    // Must be created by the requesting user
+                    && incomingData().requestedBy == userId()
+                    // Must start as 'pending'
+                    && incomingData().status == 'pending'
+                    // targetCollection must be valid
+                    && incomingData().targetCollection in ['orders', 'costs']
+                    // Cost pendings can only be created by Manager+
+                    && (incomingData().targetCollection != 'costs' || isManagerOrAbove())
+                    // rejectionCount starts at 0
+                    && incomingData().rejectionCount == 0
+                    // reviewedBy must be null on creation
+                    && incomingData().reviewedBy == null;
+
+      // Update: Status transitions only
+      // - Requester can withdraw their own pending (pending → withdrawn)
+      // - Manager+ can approve or reject any pending
+      // T-LOGIC-003: Cooldown after rejection enforced via Cloud Function
+      allow update: if isAuthenticated()
+                    && (
+                      // Case 1: Requester withdraws own pending
+                      (
+                        existingData().requestedBy == userId()
+                        && existingData().status == 'pending'
+                        && incomingData().status == 'withdrawn'
+                        && incomingData().statusUpdatedAt == request.time
+                      )
+                      ||
+                      // Case 2: Manager+ approves or rejects
+                      (
+                        isManagerOrAbove()
+                        && existingData().status == 'pending'
+                        && incomingData().status in ['approved', 'rejected']
+                        && incomingData().reviewedBy == userId()
+                        && incomingData().statusUpdatedAt == request.time
+                        // On rejection, increment rejectionCount by 1
+                        && (
+                          incomingData().status != 'rejected'
+                          || incomingData().rejectionCount == existingData().rejectionCount + 1
+                        )
+                      )
+                    )
+                    // Immutable fields: cannot change the original request data
+                    && incomingData().targetCollection == existingData().targetCollection
+                    && incomingData().targetId == existingData().targetId
+                    && incomingData().field == existingData().field
+                    && incomingData().baseValue == existingData().baseValue
+                    && incomingData().baseVersion == existingData().baseVersion
+                    && incomingData().newValue == existingData().newValue
+                    && incomingData().requestedBy == existingData().requestedBy
+                    && incomingData().requestedAt == existingData().requestedAt;
+
+      // Pending changes cannot be deleted, only status-transitioned
+      allow delete: if false;
+    }
+
+
+    // =========================================================================
+    // 5. COLUMN_DEFINITIONS COLLECTION: /column_definitions/{key}
+    // =========================================================================
+    // - Read: All authenticated users (needed to render the spreadsheet UI)
+    // - Write: Super Admin only
+    // - Block type changes if isDataRelated=true AND data exists (T-DATA-005)
+    //   NOTE: Checking "data exists" requires reading orders collection,
+    //   which is best handled in a Cloud Function. The rule below blocks
+    //   type changes on isDataRelated=true columns; the CF verifies data.
+    // - T-DOS-003: Hard limit of 100 columns enforced via Cloud Function
+    // - Mitigates: T-DATA-005, T-DOS-003, T-AUTHZ-001
+    // =========================================================================
+    match /column_definitions/{key} {
+
+      // All authenticated users can read column definitions
+      allow read: if isAuthenticated();
+
+      // Only Super Admin can create new columns
+      // T-DOS-003: 100 column limit enforced via Cloud Function
+      allow create: if isSuperAdmin()
+                    && hasAllFields(['key', 'label', 'type', 'order', 'createdAt'])
+                    && incomingData().key == key
+                    && incomingData().type in ['text', 'number', 'date', 'select']
+                    // New columns default isDataRelated to true
+                    && ('isDataRelated' in incomingData() ? incomingData().isDataRelated is bool : true);
+
+      // Only Super Admin can update column definitions
+      // T-DATA-005: Block type changes on data-related columns
+      // The full check (whether data exists) must be done in Cloud Function.
+      // Rules enforce: if isDataRelated=true, type CANNOT be changed.
+      allow update: if isSuperAdmin()
+                    && incomingData().updatedAt == request.time
+                    // Key is immutable
+                    && incomingData().key == existingData().key
+                    // T-DATA-005: If column is data-related, type cannot change
+                    && (
+                      !existingData().isDataRelated
+                      || !fieldChanged('type')
+                    )
+                    // systemField cannot be changed
+                    && (!('systemField' in existingData())
+                        || incomingData().systemField == existingData().systemField);
+
+      // Only Super Admin can delete columns
+      // System fields cannot be deleted
+      // T-DOS-003: Only non-system columns can be removed
+      allow delete: if isSuperAdmin()
+                    && !existingData().systemField;
+    }
+
+
+    // =========================================================================
+    // 6. ROLE_PERMISSIONS COLLECTION: /role_permissions/{role}
+    // =========================================================================
+    // - Read: All authenticated users (needed to determine UI visibility)
+    // - Write: Requires Super Admin AND 2nd Super Admin approval (T-AUTHZ-004)
+    //   NOTE: Two-person approval cannot be fully enforced in Firestore rules
+    //   alone. The rule below requires Super Admin for writes. The 2nd approval
+    //   step MUST be enforced via a Cloud Function that verifies a separate
+    //   approval record from a different Super Admin before committing.
+    //   The rule here is the first line of defense.
+    // - Mitigates: T-AUTHZ-004, T-AUTHZ-001
+    // =========================================================================
+    match /role_permissions/{role} {
+
+      // All authenticated users can read role permissions
+      // (needed to determine column visibility and editability in the UI)
+      allow read: if isAuthenticated();
+
+      // Only Super Admin can create role permission documents
+      allow create: if isSuperAdmin()
+                    && role in ['super_admin', 'manager', 'sr_sales', 'jr_sales']
+                    && hasAllFields(['role', 'permissions', 'updatedAt', 'updatedBy'])
+                    && incomingData().role == role
+                    && incomingData().updatedBy == userId();
+
+      // T-AUTHZ-004: Super Admin can update, but 2nd approval required
+      // The 2nd approval MUST be enforced via Cloud Function.
+      // Rule enforces: only Super Admin can initiate the change,
+      // and updatedBy must be the current user (for audit trail).
+      allow update: if isSuperAdmin()
+                    && incomingData().updatedBy == userId()
+                    && incomingData().updatedAt == request.time
+                    // Role field is immutable (it's the document ID)
+                    && incomingData().role == existingData().role;
+
+      // Role permission documents should not be deleted
+      allow delete: if false;
+    }
+
+
+    // =========================================================================
+    // 7. AUDIT_LOGS COLLECTION: /audit_logs/{logId}
+    // =========================================================================
+    // - Append-only: can create, CANNOT update or delete (T-DATA-007)
+    // - Read: Super Admin only (T-INFO-001)
+    // - Ensures tamper-proof audit trail for compliance and forensics
+    // - Mitigates: T-DATA-007, T-INFO-001
+    // =========================================================================
+    match /audit_logs/{logId} {
+
+      // T-INFO-001: Only Super Admin can read audit logs
+      // Logs may contain sensitive operational data (redacted values, actions)
+      allow read: if isSuperAdmin();
+
+      // T-DATA-007: Append-only — any authenticated user action can trigger
+      // a log entry (typically created by Cloud Functions on behalf of users).
+      // Direct client creation is allowed with strict validation.
+      allow create: if isAuthenticated()
+                    && hasAllFields([
+                      'userId', 'userName', 'action',
+                      'targetCollection', 'targetId', 'timestamp'
+                    ])
+                    // Must log the actual authenticated user
+                    && incomingData().userId == userId()
+                    // Action must be a known type
+                    && incomingData().action in [
+                      'create', 'update', 'delete', 'approve', 'reject',
+                      'withdraw', 'recover', 'permanent_delete'
+                    ]
+                    // Target collection must be valid
+                    && incomingData().targetCollection in [
+                      'orders', 'costs', 'pending_changes',
+                      'users', 'column_definitions', 'role_permissions'
+                    ]
+                    // Timestamp must be server time (prevents backdating)
+                    && incomingData().timestamp == request.time;
+
+      // T-DATA-007: NEVER allow updates — audit logs are immutable
+      allow update: if false;
+
+      // T-DATA-007: NEVER allow deletes — audit logs are immutable
+      // Log rotation (T-DOS-004: 90 days) handled via Cloud Function
+      allow delete: if false;
+    }
+
+
+    // =========================================================================
+    // CATCH-ALL: Deny access to any collection not explicitly defined above
+    // =========================================================================
+    // This prevents accidental data exposure if new collections are created
+    // without corresponding security rules.
+    // =========================================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
