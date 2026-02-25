@@ -5,7 +5,6 @@ import {
   doc,
   query,
   where,
-  orderBy,
   onSnapshot,
   addDoc,
   serverTimestamp,
@@ -113,13 +112,9 @@ export const useOrdersStore = defineStore("orders", () => {
     currentMonth.value = month;
     loading.value = true;
     error.value = null;
-    orders.value = new Map();
+    orders.value = {};
 
-    const q = query(
-      collection(db, "orders"),
-      where("month", "==", month),
-      orderBy("createdAt", "desc"),
-    );
+    const q = query(collection(db, "orders"), where("month", "==", month));
 
     unsubscribeListener = onSnapshot(
       q,
@@ -319,7 +314,7 @@ export const useOrdersStore = defineStore("orders", () => {
       unsubscribeListener();
       unsubscribeListener = null;
     }
-    orders.value = new Map();
+    orders.value = {};
     loading.value = false;
     error.value = null;
   }
