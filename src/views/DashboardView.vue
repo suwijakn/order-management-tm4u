@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { onMounted, onUnmounted, computed } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import { useOrdersStore } from "@/stores/orders";
 import { useRouter } from "vue-router";
@@ -26,21 +26,6 @@ const pendingOrders = computed(
 const completedOrders = computed(
   () => ordersStore.activeOrders.filter((o) => o.status === "completed").length,
 );
-
-const creating = ref(false);
-
-async function handleCreateOrder() {
-  creating.value = true;
-  try {
-    await ordersStore.createOrder({
-      dynamic_fields: {},
-    });
-  } catch (err) {
-    // error is shown in ordersStore.error
-  } finally {
-    creating.value = false;
-  }
-}
 
 async function handleLogout() {
   ordersStore.cleanup();
@@ -115,18 +100,9 @@ async function handleLogout() {
 
       <!-- Orders List -->
       <div class="card">
-        <div class="flex justify-between items-center mb-4">
-          <h3 class="text-lg font-semibold text-gray-900">
-            Orders — {{ currentMonth }}
-          </h3>
-          <button
-            @click="handleCreateOrder"
-            :disabled="creating"
-            class="px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50"
-          >
-            {{ creating ? "Creating…" : "+ New Order" }}
-          </button>
-        </div>
+        <h3 class="text-lg font-semibold text-gray-900 mb-4">
+          Orders — {{ currentMonth }}
+        </h3>
 
         <div v-if="ordersStore.loading" class="text-gray-400 text-center py-8">
           Loading orders…
