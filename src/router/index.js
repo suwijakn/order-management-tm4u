@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { useAuth } from "@/composables/useAuth";
 
 // Views
 import LoginView from "@/views/LoginView.vue";
@@ -50,7 +51,12 @@ const router = createRouter({
 });
 
 // Navigation guards
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
+  const { authReady } = useAuth();
+
+  // Wait for Firebase to finish restoring auth state before checking
+  await authReady;
+
   const authStore = useAuthStore();
 
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
