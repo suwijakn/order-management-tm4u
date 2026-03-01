@@ -9,6 +9,7 @@ import {
   browserLocalPersistence,
   browserSessionPersistence,
   sendEmailVerification,
+  getIdTokenResult,
 } from "firebase/auth";
 import { auth } from "@/services/firebase";
 
@@ -43,17 +44,19 @@ export function useAuth() {
 
     unsubscribe = onAuthStateChanged(
       auth,
-      (user) => {
-        currentUser.value = user;
-        loading.value = false;
-
-        // Resolve authReady on first callback
-        if (authReadyResolve) {
-          authReadyResolve();
-          authReadyResolve = null;
-        }
-
+      async (user) => {
         if (user) {
+          // Fetch custom claims from ID token
+          try {
+            const tokenResult = await getIdTokenResult(user);
+            // Attach custom claims to user object for easy access
+            user.customClaims = tokenResult.claims;
+            console.log("[useAuth] Custom claims loaded:", tokenResult.claims);
+          } catch (err) {
+            console.error("[useAuth] Failed to get custom claims:", err);
+            user.customClaims = {};
+          }
+
           // If Firebase restored the session but no local session info exists,
           // recreate it (e.g. user reopened tab with "remember me")
           const sessionData = localStorage.getItem(SESSION_STORAGE_KEY);
@@ -64,6 +67,15 @@ export function useAuth() {
             // Check session validity for existing sessions
             checkSessionValidity();
           }
+        }
+
+        currentUser.value = user;
+        loading.value = false;
+
+        // Resolve authReady on first callback
+        if (authReadyResolve) {
+          authReadyResolve();
+          authReadyResolve = null;
         }
       },
       (err) => {

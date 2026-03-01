@@ -26,7 +26,9 @@ export const useAuthStore = defineStore("auth", () => {
       currentUser.value?.email?.split("@")[0] ||
       "",
   );
-  const userRole = computed(() => currentUser.value?.role || "user");
+  const userRole = computed(
+    () => currentUser.value?.customClaims?.role || null,
+  );
   const emailVerified = computed(() => isEmailVerified());
 
   // Actions
