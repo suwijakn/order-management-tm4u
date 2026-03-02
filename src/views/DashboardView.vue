@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onUnmounted, computed } from "vue";
+import { onMounted, onUnmounted, computed, ref, watch } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import { useOrdersStore } from "@/stores/orders";
 import { useRouter } from "vue-router";
@@ -8,8 +8,8 @@ const authStore = useAuthStore();
 const ordersStore = useOrdersStore();
 const router = useRouter();
 
-// Default to current month in YYYY-MM format
-const currentMonth = new Date().toISOString().slice(0, 7);
+// Default to current month in YYYY-MM format, but allow user to change
+const selectedMonth = ref(new Date().toISOString().slice(0, 7));
 
 // Check if user has allowed role for dashboard access
 const allowedRoles = ["super_admin", "manager", "jr_sales", "sr_sales"];
@@ -29,8 +29,19 @@ const isAuthorized = computed(() => {
   return userRole && allowedRoles.includes(userRole);
 });
 
+// Watch for month changes and refetch orders
+watch(selectedMonth, (newMonth) => {
+  console.log("[Dashboard] Month changed to:", newMonth);
+  ordersStore.fetchOrders(newMonth);
+});
+
 onMounted(() => {
-  ordersStore.fetchOrders(currentMonth);
+  console.log(
+    "[Dashboard] Mounting, fetching orders for:",
+    selectedMonth.value,
+  );
+  console.log("[Dashboard] Current user role:", authStore.userRole);
+  ordersStore.fetchOrders(selectedMonth.value);
 });
 
 onUnmounted(() => {
@@ -135,8 +146,24 @@ async function handleLogout() {
     <!-- Main Content -->
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="mb-8">
-        <h2 class="text-2xl font-bold text-gray-900">Dashboard</h2>
-        <p class="text-gray-600 mt-1">Welcome to the Order Management System</p>
+        <div class="flex justify-between items-center">
+          <div>
+            <h2 class="text-2xl font-bold text-gray-900">Dashboard</h2>
+            <p class="text-gray-600 mt-1">
+              Welcome to the Order Management System
+            </p>
+          </div>
+
+          <!-- Month Selector -->
+          <div class="flex items-center gap-2">
+            <label class="text-sm font-medium text-gray-700">Month:</label>
+            <input
+              v-model="selectedMonth"
+              type="month"
+              class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
       </div>
 
       <!-- Stat Cards -->
@@ -162,7 +189,7 @@ async function handleLogout() {
         <div class="card">
           <div class="text-sm text-gray-500">Month</div>
           <div class="text-3xl font-bold text-primary-600 mt-2">
-            {{ currentMonth }}
+            {{ selectedMonth }}
           </div>
         </div>
       </div>
@@ -178,7 +205,7 @@ async function handleLogout() {
       <!-- Orders List -->
       <div class="card">
         <h3 class="text-lg font-semibold text-gray-900 mb-4">
-          Orders — {{ currentMonth }}
+          Orders — {{ selectedMonth }}
         </h3>
 
         <div v-if="ordersStore.loading" class="text-gray-400 text-center py-8">
@@ -189,7 +216,7 @@ async function handleLogout() {
           v-else-if="ordersStore.activeOrders.length === 0"
           class="text-gray-500 text-center py-8"
         >
-          No orders for {{ currentMonth }}.
+          No orders for {{ selectedMonth }}.
         </div>
 
         <table v-else class="w-full text-sm">

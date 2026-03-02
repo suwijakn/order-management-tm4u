@@ -1,5 +1,5 @@
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { defineStore } from "pinia";
+import { ref, computed } from "vue";
 import {
   collection,
   doc,
@@ -10,20 +10,20 @@ import {
   addDoc,
   serverTimestamp,
   runTransaction,
-} from 'firebase/firestore'
-import { db } from '@/services/firebase'
-import { useAuthStore } from '@/stores/auth'
+} from "firebase/firestore";
+import { db } from "@/services/firebase";
+import { useAuthStore } from "@/stores/auth";
 
-export const useCostsStore = defineStore('costs', () => {
+export const useCostsStore = defineStore("costs", () => {
   // ---------------------------------------------------------------------------
   // State
   // ---------------------------------------------------------------------------
-  const costs = ref(new Map())        // Map<costId, Cost>
-  const currentMonth = ref('')        // YYYY-MM
-  const loading = ref(false)
-  const error = ref(null)
+  const costs = ref(new Map()); // Map<costId, Cost>
+  const currentMonth = ref(""); // YYYY-MM
+  const loading = ref(false);
+  const error = ref(null);
 
-  let unsubscribeListener = null
+  let unsubscribeListener = null;
 
   // ---------------------------------------------------------------------------
   // Getters
@@ -32,54 +32,81 @@ export const useCostsStore = defineStore('costs', () => {
   // Active (non-deleted) costs for current month
   const activeCosts = computed(() => {
     return Array.from(costs.value.values()).filter(
-      (c) => !c.deletedAt && c.month === currentMonth.value
-    )
-  })
+      (c) => !c.deletedAt && c.month === currentMonth.value,
+    );
+  });
 
   // Soft-deleted costs (visible to Manager+ for recovery)
   const deletedCosts = computed(() => {
     return Array.from(costs.value.values()).filter(
-      (c) => !!c.deletedAt && c.month === currentMonth.value
-    )
-  })
+      (c) => !!c.deletedAt && c.month === currentMonth.value,
+    );
+  });
 
   // Costs grouped by month key
   const costsByMonth = computed(() => {
-    const grouped = {}
+    const grouped = {};
     for (const cost of costs.value.values()) {
-      if (!grouped[cost.month]) grouped[cost.month] = []
-      grouped[cost.month].push(cost)
+      if (!grouped[cost.month]) grouped[cost.month] = [];
+      grouped[cost.month].push(cost);
     }
-    return grouped
-  })
+    return grouped;
+  });
 
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
+  async function addAuditLog(action, targetId, details = {}) {
+    const authStore = useAuthStore();
+    console.log("[costs] Creating audit log:", {
+      action,
+      targetId,
+      details,
+      userId: authStore.user?.uid,
+      userName: authStore.user?.displayName || authStore.userEmail,
+    });
+
+    try {
+      const auditRef = await addDoc(collection(db, "audit_logs"), {
+        userId: authStore.user.uid,
+        userName: authStore.user.displayName || authStore.userEmail || "",
+        action,
+        targetCollection: "costs",
+        targetId,
+        details,
+        timestamp: serverTimestamp(),
+      });
+      console.log("[costs] Audit log created with ID:", auditRef.id);
+    } catch (err) {
+      console.error("[costs] audit log failed:", err);
+      throw err; // Re-throw so we can see the error
+    }
+  }
+
   function isAuthorized() {
-    const authStore = useAuthStore()
+    const authStore = useAuthStore();
     // T-AUTHZ-005: Cost data restricted to Manager and Super Admin only
-    return ['manager', 'super_admin'].includes(authStore.user?.role ?? '')
+    return ["manager", "super_admin"].includes(authStore.userRole ?? "");
   }
 
   function convertTimestamps(data) {
-    const result = { ...data }
-    const tsFields = ['createdAt', 'updatedAt', 'deletedAt']
+    const result = { ...data };
+    const tsFields = ["createdAt", "updatedAt", "deletedAt"];
     for (const field of tsFields) {
-      if (result[field]?.toDate) result[field] = result[field].toDate()
-      else if (result[field] === undefined) result[field] = null
+      if (result[field]?.toDate) result[field] = result[field].toDate();
+      else if (result[field] === undefined) result[field] = null;
     }
-    return result
+    return result;
   }
 
   function handleError(err) {
-    console.error('[costs]', err)
-    if (err.code === 'permission-denied') {
-      error.value = 'You do not have permission to access cost data.'
-    } else if (err.code === 'not-found') {
-      error.value = 'Cost entry not found.'
+    console.error("[costs]", err);
+    if (err.code === "permission-denied") {
+      error.value = "You do not have permission to access cost data.";
+    } else if (err.code === "not-found") {
+      error.value = "Cost entry not found.";
     } else {
-      error.value = err.message || 'An unexpected error occurred.'
+      error.value = err.message || "An unexpected error occurred.";
     }
   }
 
@@ -90,51 +117,72 @@ export const useCostsStore = defineStore('costs', () => {
   /**
    * Subscribe to real-time updates for a given month.
    * T-AUTHZ-005: Only fetches if user is Manager or Super Admin.
-   * Silently skips for unauthorized roles (rules will also enforce this).
    */
   function fetchCosts(month) {
     if (!isAuthorized()) {
-      // Unauthorized roles get no data — Firestore rules enforce this too,
-      // but we skip the listener entirely to avoid error noise on the client.
-      return
+      // Unauthorized roles get permission denied error
+      const err = {
+        code: "permission-denied",
+        message: "Only Managers and Super Admins can access cost data.",
+      };
+      handleError(err);
+      throw err;
     }
 
     if (unsubscribeListener) {
-      unsubscribeListener()
-      unsubscribeListener = null
+      unsubscribeListener();
+      unsubscribeListener = null;
     }
 
-    currentMonth.value = month
-    loading.value = true
-    error.value = null
-    costs.value = new Map()
+    currentMonth.value = month;
+    loading.value = true;
+    error.value = null;
+    costs.value = new Map();
 
     const q = query(
-      collection(db, 'costs'),
-      where('month', '==', month),
-      orderBy('createdAt', 'desc')
-    )
+      collection(db, "costs"),
+      where("month", "==", month),
+      orderBy("createdAt", "desc"),
+    );
 
     unsubscribeListener = onSnapshot(
       q,
       (snapshot) => {
+        console.log("[costs] Snapshot received:", {
+          size: snapshot.size,
+          docChanges: snapshot.docChanges().length,
+          currentMonth: month,
+        });
+
         snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added' || change.type === 'modified') {
+          console.log("[costs] Doc change:", {
+            type: change.type,
+            id: change.doc.id,
+            data: change.doc.data(),
+            month: change.doc.data()?.month,
+          });
+
+          if (change.type === "added" || change.type === "modified") {
             costs.value.set(change.doc.id, {
               id: change.doc.id,
               ...convertTimestamps(change.doc.data()),
-            })
-          } else if (change.type === 'removed') {
-            costs.value.delete(change.doc.id)
+            });
+            console.log("[costs] Cost added/updated:", change.doc.id);
+          } else if (change.type === "removed") {
+            costs.value.delete(change.doc.id);
+            console.log("[costs] Cost removed:", change.doc.id);
           }
-        })
-        loading.value = false
+        });
+
+        console.log("[costs] Total costs in store:", costs.value.size);
+        loading.value = false;
       },
       (err) => {
-        handleError(err)
-        loading.value = false
-      }
-    )
+        console.error("[costs] Snapshot error:", err);
+        handleError(err);
+        loading.value = false;
+      },
+    );
   }
 
   /**
@@ -142,18 +190,22 @@ export const useCostsStore = defineStore('costs', () => {
    */
   async function createCost(costData) {
     if (!isAuthorized()) {
-      error.value = 'Only Managers and Super Admins can create cost entries.'
-      throw new Error(error.value)
+      error.value = "Only Managers and Super Admins can create cost entries.";
+      throw new Error(error.value);
     }
 
-    const authStore = useAuthStore()
-    error.value = null
+    const authStore = useAuthStore();
+    error.value = null;
 
     try {
-      const docRef = await addDoc(collection(db, 'costs'), {
+      console.log("[costs] Creating cost with data:", costData);
+      console.log("[costs] Using month from costData:", costData.month);
+      console.log("[costs] currentMonth.value:", currentMonth.value);
+
+      const docRef = await addDoc(collection(db, "costs"), {
         ...costData,
-        month: currentMonth.value,
-        status: costData.status ?? 'active',
+        month: costData.month, // Use the month from costData, not currentMonth
+        status: costData.status ?? "active",
         version: 1,
         createdBy: authStore.user.uid,
         createdByName: authStore.user.displayName || authStore.userEmail,
@@ -161,11 +213,30 @@ export const useCostsStore = defineStore('costs', () => {
         updatedAt: serverTimestamp(),
         deletedAt: null,
         deletedBy: null,
-      })
-      return docRef.id
+      });
+
+      console.log("[costs] Cost created with ID:", docRef.id);
+      console.log("[costs] Cost document written to Firestore");
+
+      // Add audit log
+      console.log("[costs] Adding audit log for cost creation...");
+      try {
+        await addAuditLog("create", docRef.id, {
+          month: costData.month,
+          status: costData.status,
+          dynamicFields: costData.dynamic_fields,
+        });
+        console.log("[costs] Audit log added successfully");
+      } catch (auditErr) {
+        console.error("[costs] Failed to add audit log:", auditErr);
+        // Don't throw - audit log failure shouldn't break the main operation
+      }
+
+      return docRef.id;
     } catch (err) {
-      handleError(err)
-      throw err
+      console.error("[costs] Create cost error:", err);
+      handleError(err);
+      throw err;
     }
   }
 
@@ -175,54 +246,58 @@ export const useCostsStore = defineStore('costs', () => {
    */
   async function updateCost(costId, field, value, version) {
     if (!isAuthorized()) {
-      error.value = 'Only Managers and Super Admins can update cost entries.'
-      throw new Error(error.value)
+      error.value = "Only Managers and Super Admins can update cost entries.";
+      throw new Error(error.value);
     }
 
-    error.value = null
-    const cost = costs.value.get(costId)
+    error.value = null;
+    const cost = costs.value.get(costId);
     if (!cost) {
-      error.value = 'Cost entry not found.'
-      return
+      error.value = "Cost entry not found.";
+      return;
     }
 
-    const previous = { ...cost }
+    const previous = { ...cost };
     costs.value.set(costId, {
       ...cost,
       dynamic_fields: { ...cost.dynamic_fields, [field]: value },
       version: version + 1,
-    })
+    });
 
     try {
       await runTransaction(db, async (tx) => {
-        const costRef = doc(db, 'costs', costId)
-        const snap = await tx.get(costRef)
+        const costRef = doc(db, "costs", costId);
+        const snap = await tx.get(costRef);
 
-        if (!snap.exists()) throw { code: 'not-found', message: 'Cost entry not found.' }
+        if (!snap.exists())
+          throw { code: "not-found", message: "Cost entry not found." };
 
-        const serverVersion = snap.data().version
+        const serverVersion = snap.data().version;
         if (serverVersion !== version) {
           throw {
-            code: 'version_conflict',
+            code: "version_conflict",
             message: `Version conflict: expected ${version}, got ${serverVersion}.`,
             serverVersion,
-          }
+          };
         }
 
-        if (snap.data().status === 'completed') {
-          throw { code: 'completed_order', message: 'Cannot edit a completed cost entry.' }
+        if (snap.data().status === "completed") {
+          throw {
+            code: "completed_order",
+            message: "Cannot edit a completed cost entry.",
+          };
         }
 
         tx.update(costRef, {
           [`dynamic_fields.${field}`]: value,
           version: version + 1,
           updatedAt: serverTimestamp(),
-        })
-      })
+        });
+      });
     } catch (err) {
-      costs.value.set(costId, previous)
-      handleError(err)
-      throw err
+      costs.value.set(costId, previous);
+      handleError(err);
+      throw err;
     }
   }
 
@@ -231,39 +306,40 @@ export const useCostsStore = defineStore('costs', () => {
    */
   async function softDeleteCost(costId) {
     if (!isAuthorized()) {
-      error.value = 'Only Managers and Super Admins can delete cost entries.'
-      throw new Error(error.value)
+      error.value = "Only Managers and Super Admins can delete cost entries.";
+      throw new Error(error.value);
     }
 
-    const authStore = useAuthStore()
-    error.value = null
-    const cost = costs.value.get(costId)
+    const authStore = useAuthStore();
+    error.value = null;
+    const cost = costs.value.get(costId);
     if (!cost) {
-      error.value = 'Cost entry not found.'
-      return
+      error.value = "Cost entry not found.";
+      return;
     }
 
-    const previous = { ...cost }
-    const now = new Date()
-    costs.value.set(costId, { ...cost, deletedAt: now })
+    const previous = { ...cost };
+    const now = new Date();
+    costs.value.set(costId, { ...cost, deletedAt: now });
 
     try {
       await runTransaction(db, async (tx) => {
-        const costRef = doc(db, 'costs', costId)
-        const snap = await tx.get(costRef)
-        if (!snap.exists()) throw { code: 'not-found', message: 'Cost entry not found.' }
+        const costRef = doc(db, "costs", costId);
+        const snap = await tx.get(costRef);
+        if (!snap.exists())
+          throw { code: "not-found", message: "Cost entry not found." };
 
         tx.update(costRef, {
           deletedAt: serverTimestamp(),
           deletedBy: authStore.user.uid,
           version: snap.data().version + 1,
           updatedAt: serverTimestamp(),
-        })
-      })
+        });
+      });
     } catch (err) {
-      costs.value.set(costId, previous)
-      handleError(err)
-      throw err
+      costs.value.set(costId, previous);
+      handleError(err);
+      throw err;
     }
   }
 
@@ -272,37 +348,38 @@ export const useCostsStore = defineStore('costs', () => {
    */
   async function recoverCost(costId) {
     if (!isAuthorized()) {
-      error.value = 'Only Managers and Super Admins can recover cost entries.'
-      throw new Error(error.value)
+      error.value = "Only Managers and Super Admins can recover cost entries.";
+      throw new Error(error.value);
     }
 
-    error.value = null
-    const cost = costs.value.get(costId)
+    error.value = null;
+    const cost = costs.value.get(costId);
     if (!cost) {
-      error.value = 'Cost entry not found.'
-      return
+      error.value = "Cost entry not found.";
+      return;
     }
 
-    const previous = { ...cost }
-    costs.value.set(costId, { ...cost, deletedAt: null, deletedBy: null })
+    const previous = { ...cost };
+    costs.value.set(costId, { ...cost, deletedAt: null, deletedBy: null });
 
     try {
       await runTransaction(db, async (tx) => {
-        const costRef = doc(db, 'costs', costId)
-        const snap = await tx.get(costRef)
-        if (!snap.exists()) throw { code: 'not-found', message: 'Cost entry not found.' }
+        const costRef = doc(db, "costs", costId);
+        const snap = await tx.get(costRef);
+        if (!snap.exists())
+          throw { code: "not-found", message: "Cost entry not found." };
 
         tx.update(costRef, {
           deletedAt: null,
           deletedBy: null,
           version: snap.data().version + 1,
           updatedAt: serverTimestamp(),
-        })
-      })
+        });
+      });
     } catch (err) {
-      costs.value.set(costId, previous)
-      handleError(err)
-      throw err
+      costs.value.set(costId, previous);
+      handleError(err);
+      throw err;
     }
   }
 
@@ -311,12 +388,12 @@ export const useCostsStore = defineStore('costs', () => {
    */
   function cleanup() {
     if (unsubscribeListener) {
-      unsubscribeListener()
-      unsubscribeListener = null
+      unsubscribeListener();
+      unsubscribeListener = null;
     }
-    costs.value = new Map()
-    loading.value = false
-    error.value = null
+    costs.value = new Map();
+    loading.value = false;
+    error.value = null;
   }
 
   return {
@@ -336,5 +413,5 @@ export const useCostsStore = defineStore('costs', () => {
     softDeleteCost,
     recoverCost,
     cleanup,
-  }
-})
+  };
+});

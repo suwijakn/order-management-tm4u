@@ -24,6 +24,7 @@ export const useOrdersStore = defineStore("orders", () => {
   const error = ref(null);
 
   let unsubscribeListener = null;
+  let unsubscribeDeletedListener = null;
 
   // ---------------------------------------------------------------------------
   // Getters
@@ -36,11 +37,9 @@ export const useOrdersStore = defineStore("orders", () => {
     );
   });
 
-  // Soft-deleted orders for current month (visible to Manager+ for recovery)
+  // Soft-deleted orders for all months (visible to Manager+ for recovery)
   const deletedOrders = computed(() => {
-    return Object.values(orders.value).filter(
-      (o) => !!o.deletedAt && o.month === currentMonth.value,
-    );
+    return Object.values(orders.value).filter((o) => !!o.deletedAt);
   });
 
   // Orders grouped by month key
@@ -104,10 +103,14 @@ export const useOrdersStore = defineStore("orders", () => {
    * Unsubscribes from any previous listener first.
    */
   function fetchOrders(month) {
-    // Stop previous listener
+    // Stop previous listeners
     if (unsubscribeListener) {
       unsubscribeListener();
       unsubscribeListener = null;
+    }
+    if (unsubscribeDeletedListener) {
+      unsubscribeDeletedListener();
+      unsubscribeDeletedListener = null;
     }
 
     currentMonth.value = month;
@@ -115,6 +118,7 @@ export const useOrdersStore = defineStore("orders", () => {
     error.value = null;
     orders.value = {};
 
+    // Fetch active orders for current month
     const q = query(
       collection(db, "orders"),
       where("month", "==", month),
@@ -122,6 +126,62 @@ export const useOrdersStore = defineStore("orders", () => {
     );
 
     unsubscribeListener = onSnapshot(
+      q,
+      (snapshot) => {
+        console.log("[orders] Snapshot received:", {
+          month: month,
+          size: snapshot.size,
+          docChanges: snapshot.docChanges().length,
+        });
+
+        snapshot.docChanges().forEach((change) => {
+          console.log("[orders] Doc change:", {
+            type: change.type,
+            id: change.doc.id,
+            month: change.doc.data()?.month,
+            deletedAt: change.doc.data()?.deletedAt,
+          });
+
+          if (change.type === "added" || change.type === "modified") {
+            orders.value[change.doc.id] = {
+              id: change.doc.id,
+              ...convertTimestamps(change.doc.data()),
+            };
+          } else if (change.type === "removed") {
+            delete orders.value[change.doc.id];
+          }
+        });
+
+        console.log(
+          "[orders] Total orders in store:",
+          Object.keys(orders.value).length,
+        );
+        console.log("[orders] currentMonth.value:", currentMonth.value);
+
+        loading.value = false;
+      },
+      (err) => {
+        console.error("[orders] Snapshot error:", err);
+        handleError(err);
+        loading.value = false;
+      },
+    );
+
+    // Also fetch all soft-deleted orders for all months
+    fetchDeletedOrders();
+  }
+
+  /**
+   * Fetch all soft-deleted orders across all months
+   */
+  function fetchDeletedOrders() {
+    const q = query(
+      collection(db, "orders"),
+      where("deletedAt", "!=", null),
+      orderBy("deletedAt", "desc"),
+    );
+
+    unsubscribeDeletedListener = onSnapshot(
       q,
       (snapshot) => {
         snapshot.docChanges().forEach((change) => {
@@ -134,11 +194,9 @@ export const useOrdersStore = defineStore("orders", () => {
             delete orders.value[change.doc.id];
           }
         });
-        loading.value = false;
       },
       (err) => {
-        handleError(err);
-        loading.value = false;
+        console.warn("[orders] Failed to fetch deleted orders:", err);
       },
     );
   }
@@ -238,26 +296,39 @@ export const useOrdersStore = defineStore("orders", () => {
   /**
    * Soft-delete an order by setting deletedAt (T-DATA-009).
    * Hard delete is not permitted from the client.
+   * Only Manager and Super Admin can soft delete (T-AUTHZ-003).
    */
   async function softDeleteOrder(orderId) {
     const authStore = useAuthStore();
     error.value = null;
-    const order = orders.value[orderId];
-    if (!order) {
-      error.value = "Order not found.";
-      return;
+
+    // Frontend role check - only manager and super_admin can soft delete
+    const userRole = authStore.userRole;
+    const allowedRoles = ["manager", "super_admin"];
+    if (!userRole || !allowedRoles.includes(userRole)) {
+      const err = {
+        code: "permission-denied",
+        message: "Only Manager and Super Admin can delete orders.",
+      };
+      handleError(err);
+      throw err;
     }
 
-    const previous = { ...order };
-    const now = new Date();
-    orders.value[orderId] = { ...order, deletedAt: now };
+    const order = orders.value[orderId];
+    if (!order) {
+      const err = { code: "not-found", message: "Order not found." };
+      handleError(err);
+      throw err;
+    }
 
+    // Don't do optimistic update - wait for Firestore confirmation
     try {
       await runTransaction(db, async (tx) => {
         const orderRef = doc(db, "orders", orderId);
         const snap = await tx.get(orderRef);
-        if (!snap.exists())
+        if (!snap.exists()) {
           throw { code: "not-found", message: "Order not found." };
+        }
 
         tx.update(orderRef, {
           deletedAt: serverTimestamp(),
@@ -266,9 +337,16 @@ export const useOrdersStore = defineStore("orders", () => {
           updatedAt: serverTimestamp(),
         });
       });
+
+      // Update local state only after successful Firestore update
+      orders.value[orderId] = {
+        ...order,
+        deletedAt: new Date(),
+        deletedBy: authStore.user.uid,
+      };
+
       await addAuditLog("delete", orderId, { month: order.month });
     } catch (err) {
-      orders.value[orderId] = previous;
       handleError(err);
       throw err;
     }
@@ -318,6 +396,10 @@ export const useOrdersStore = defineStore("orders", () => {
     if (unsubscribeListener) {
       unsubscribeListener();
       unsubscribeListener = null;
+    }
+    if (unsubscribeDeletedListener) {
+      unsubscribeDeletedListener();
+      unsubscribeDeletedListener = null;
     }
     orders.value = {};
     loading.value = false;
