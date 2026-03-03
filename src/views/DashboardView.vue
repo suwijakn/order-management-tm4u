@@ -2,10 +2,12 @@
 import { onMounted, onUnmounted, computed, ref, watch } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import { useOrdersStore } from "@/stores/orders";
+import { useColumnsStore } from "@/stores/columns";
 import { useRouter } from "vue-router";
 
 const authStore = useAuthStore();
 const ordersStore = useOrdersStore();
+const columnsStore = useColumnsStore();
 const router = useRouter();
 
 // Default to current month in YYYY-MM format, but allow user to change
@@ -35,17 +37,57 @@ watch(selectedMonth, (newMonth) => {
   ordersStore.fetchOrders(newMonth);
 });
 
+// Get visible columns for current user's role
+const visibleColumns = computed(() => {
+  const role = authStore.userRole;
+  if (!role) return [];
+  return columnsStore.visibleColumns(role);
+});
+
+// Get the value from an order's dynamic_fields for a given column key
+function getOrderFieldValue(order, columnKey) {
+  // Check if it's a system field (top-level)
+  if (order[columnKey] !== undefined) {
+    return order[columnKey];
+  }
+  // Otherwise check dynamic_fields
+  return order.dynamic_fields?.[columnKey] ?? "—";
+}
+
+// Format value for display based on column type
+function formatValue(value, columnType) {
+  if (value === null || value === undefined || value === "") return "—";
+
+  if (columnType === "date" && value) {
+    try {
+      return new Date(value).toLocaleDateString();
+    } catch {
+      return value;
+    }
+  }
+
+  if (columnType === "number" && typeof value === "number") {
+    return value.toLocaleString();
+  }
+
+  return value;
+}
+
 onMounted(() => {
   console.log(
     "[Dashboard] Mounting, fetching orders for:",
     selectedMonth.value,
   );
   console.log("[Dashboard] Current user role:", authStore.userRole);
+
+  // Fetch column definitions and role permissions
+  columnsStore.fetchColumns();
   ordersStore.fetchOrders(selectedMonth.value);
 });
 
 onUnmounted(() => {
   ordersStore.cleanup();
+  columnsStore.cleanup();
 });
 
 const totalOrders = computed(() => ordersStore.activeOrders.length);
@@ -208,10 +250,15 @@ async function handleLogout() {
           Orders — {{ selectedMonth }}
         </h3>
 
-        <div v-if="ordersStore.loading" class="text-gray-400 text-center py-8">
-          Loading orders…
+        <!-- Loading state -->
+        <div
+          v-if="ordersStore.loading || columnsStore.loading"
+          class="text-gray-400 text-center py-8"
+        >
+          Loading…
         </div>
 
+        <!-- No orders -->
         <div
           v-else-if="ordersStore.activeOrders.length === 0"
           class="text-gray-500 text-center py-8"
@@ -219,48 +266,86 @@ async function handleLogout() {
           No orders for {{ selectedMonth }}.
         </div>
 
-        <table v-else class="w-full text-sm">
-          <thead>
-            <tr class="border-b text-left text-gray-500">
-              <th class="pb-2 pr-4">ID</th>
-              <th class="pb-2 pr-4">Status</th>
-              <th class="pb-2 pr-4">Created By</th>
-              <th class="pb-2">Created At</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="order in ordersStore.activeOrders"
-              :key="order.id"
-              class="border-b last:border-0 hover:bg-gray-50"
-            >
-              <td class="py-2 pr-4 font-mono text-xs text-gray-500">
-                {{ order.id.slice(0, 8) }}…
-              </td>
-              <td class="py-2 pr-4">
-                <span
-                  class="px-2 py-0.5 rounded-full text-xs font-medium"
-                  :class="{
-                    'bg-green-100 text-green-700': order.status === 'active',
-                    'bg-blue-100 text-blue-700': order.status === 'completed',
-                    'bg-gray-100 text-gray-500': order.status === 'cancelled',
-                  }"
-                  >{{ order.status }}</span
+        <!-- No columns visible for this role -->
+        <div
+          v-else-if="visibleColumns.length === 0"
+          class="text-gray-500 text-center py-8"
+        >
+          No columns are visible for your role ({{ authStore.userRole }}).
+          <p class="text-xs mt-2">
+            Contact your administrator to configure column permissions.
+          </p>
+        </div>
+
+        <!-- Dynamic table based on column_definitions and role_permissions -->
+        <div v-else class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b text-left text-gray-500">
+                <!-- Always show ID column -->
+                <th class="pb-2 pr-4 whitespace-nowrap">ID</th>
+                <!-- Dynamic columns based on role permissions -->
+                <th
+                  v-for="col in visibleColumns"
+                  :key="col.key"
+                  class="pb-2 pr-4 whitespace-nowrap"
                 >
-              </td>
-              <td class="py-2 pr-4">
-                {{ order.createdByName || order.createdBy }}
-              </td>
-              <td class="py-2 text-gray-500">
-                {{
-                  order.createdAt
-                    ? new Date(order.createdAt).toLocaleDateString()
-                    : "—"
-                }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                  {{ col.label }}
+                </th>
+                <!-- Always show system columns -->
+                <th class="pb-2 pr-4 whitespace-nowrap">Status</th>
+                <th class="pb-2 pr-4 whitespace-nowrap">Created By</th>
+                <th class="pb-2 whitespace-nowrap">Created At</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="order in ordersStore.activeOrders"
+                :key="order.id"
+                class="border-b last:border-0 hover:bg-gray-50"
+              >
+                <!-- ID column -->
+                <td class="py-2 pr-4 font-mono text-xs text-gray-500">
+                  {{ order.id.slice(0, 8) }}…
+                </td>
+                <!-- Dynamic columns -->
+                <td
+                  v-for="col in visibleColumns"
+                  :key="col.key"
+                  class="py-2 pr-4"
+                >
+                  {{
+                    formatValue(getOrderFieldValue(order, col.key), col.type)
+                  }}
+                </td>
+                <!-- Status column -->
+                <td class="py-2 pr-4">
+                  <span
+                    class="px-2 py-0.5 rounded-full text-xs font-medium"
+                    :class="{
+                      'bg-green-100 text-green-700': order.status === 'active',
+                      'bg-blue-100 text-blue-700': order.status === 'completed',
+                      'bg-gray-100 text-gray-500': order.status === 'cancelled',
+                    }"
+                    >{{ order.status }}</span
+                  >
+                </td>
+                <!-- Created By column -->
+                <td class="py-2 pr-4">
+                  {{ order.createdByName || order.createdBy }}
+                </td>
+                <!-- Created At column -->
+                <td class="py-2 text-gray-500">
+                  {{
+                    order.createdAt
+                      ? new Date(order.createdAt).toLocaleDateString()
+                      : "—"
+                  }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </main>
   </div>
