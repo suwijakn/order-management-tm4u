@@ -87,14 +87,29 @@ const pendingCount = computed(() => {
 
 // Get pending change for a specific order + field combination
 function getPendingForField(orderId, fieldKey) {
-  return pendingsStore.allPendingItems.find(
-    (p) => p.targetId === orderId && p.field === fieldKey,
-  );
+  const pending = pendingsStore.allPendingItems.find((p) => {
+    // Match targetId
+    if (p.targetId !== orderId) return false;
+
+    // Match field - handle both "field" and "dynamic_fields.field" formats
+    const pendingField = p.field;
+    const normalizedPendingField = pendingField.replace("dynamic_fields.", "");
+
+    return pendingField === fieldKey || normalizedPendingField === fieldKey;
+  });
+
+  return pending;
 }
 
 // Check if a field has a pending change
 function hasPendingChange(orderId, fieldKey) {
-  return !!getPendingForField(orderId, fieldKey);
+  const result = !!getPendingForField(orderId, fieldKey);
+  if (pendingsStore.allPendingItems.length > 0) {
+    console.log(
+      `[Dashboard] hasPendingChange(${orderId}, ${fieldKey}) = ${result}`,
+    );
+  }
+  return result;
 }
 
 // Format date for tooltip display
@@ -134,7 +149,20 @@ onMounted(() => {
   ordersStore.fetchOrders(selectedMonth.value);
 
   // Fetch all pending changes for field indicators
+  console.log("[Dashboard] Fetching all pending changes...");
   pendingsStore.fetchAllPendings();
+
+  // Debug: Log pending changes after a delay
+  setTimeout(() => {
+    console.log(
+      "[Dashboard] All pending items:",
+      pendingsStore.allPendingItems,
+    );
+    console.log(
+      "[Dashboard] Pending count:",
+      pendingsStore.allPendingItems.length,
+    );
+  }, 2000);
 });
 
 onUnmounted(() => {
@@ -420,46 +448,41 @@ async function handleLogout() {
                       <!-- Tooltip -->
                       <div
                         v-if="isTooltipVisible(order.id, col.key)"
-                        class="absolute z-50 bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 bg-gray-900 text-white text-xs rounded-lg shadow-lg p-3"
+                        class="fixed z-[9999] w-72 bg-gray-900 text-white text-xs rounded-lg shadow-xl p-4"
+                        :style="{
+                          top: '50%',
+                          left: '50%',
+                          transform: 'translate(-50%, -50%)',
+                        }"
                       >
-                        <div class="font-semibold text-amber-400 mb-2">
+                        <div class="font-semibold text-amber-400 mb-3 text-sm">
                           ⏳ Pending Change Request
                         </div>
-                        <div class="space-y-1">
-                          <div>
+                        <div class="space-y-2">
+                          <div class="flex justify-between">
                             <span class="text-gray-400">Requested by:</span>
-                            <span class="ml-1">{{
+                            <span class="text-white font-medium">{{
                               getPendingForField(order.id, col.key)
-                                ?.requestedByName
+                                ?.requestedByName || "—"
                             }}</span>
                           </div>
-                          <div>
+                          <div class="flex justify-between">
                             <span class="text-gray-400">Requested at:</span>
-                            <span class="ml-1">{{
+                            <span class="text-white">{{
                               formatDateTime(
                                 getPendingForField(order.id, col.key)
                                   ?.requestedAt,
                               )
                             }}</span>
                           </div>
-                          <div>
-                            <span class="text-gray-400">Current value:</span>
-                            <span class="ml-1 text-gray-300">{{
-                              getPendingForField(order.id, col.key)
-                                ?.baseValue ?? "—"
-                            }}</span>
-                          </div>
-                          <div>
+                          <div class="flex justify-between">
                             <span class="text-gray-400">New value:</span>
-                            <span class="ml-1 text-green-400 font-medium">{{
-                              getPendingForField(order.id, col.key)?.newValue
+                            <span class="text-green-400 font-bold">{{
+                              getPendingForField(order.id, col.key)?.newValue ??
+                              "—"
                             }}</span>
                           </div>
                         </div>
-                        <!-- Arrow -->
-                        <div
-                          class="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"
-                        ></div>
                       </div>
                     </div>
                   </div>
