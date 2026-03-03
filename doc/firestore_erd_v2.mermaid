@@ -97,7 +97,7 @@ erDiagram
   COLUMN_DEFINITIONS {
     string key PK "Document ID = unique column identifier"
     string label "Human-readable name"
-    string type "text|number|date|select"
+    string dataType "text|number|date|datetime|currency|boolean|select"
     int order "Display order in spreadsheet"
     array options "For select type: [option1, option2]"
     boolean systemField "true for id, month, status (non-deletable)"
@@ -110,12 +110,13 @@ erDiagram
   %% ROLE_PERMISSIONS COLLECTION: /role_permissions/{role}
   %% Document ID = role name (e.g., 'jr_sales')
   %% Map structure for O(1) column permission lookup
+  %% Permission keys MUST match COLUMN_DEFINITIONS.key (short form)
+  %% Example: permissions.customer_name (NOT dynamic_fields.customer_name)
   %% ─────────────────────────────────────────────────────────────────
   ROLE_PERMISSIONS {
     string role PK "Document ID = role name"
     map permissions "key: {visible: bool, editable: bool, requiresApproval: bool}"
     timestamp updatedAt
-    string updatedBy "Super Admin UID"
   }
 
   %% ─────────────────────────────────────────────────────────────────
@@ -149,7 +150,7 @@ erDiagram
   ORDERS ||--o{ PENDING_CHANGES : "targetId (logical reference)"
   COSTS ||--o{ PENDING_CHANGES : "targetId (logical reference)"
   
-  COLUMN_DEFINITIONS ||--o{ ROLE_PERMISSIONS : "permissions.key matches COLUMN_DEFINITIONS.key"
+  COLUMN_DEFINITIONS ||--o{ ROLE_PERMISSIONS : "Logical reference: permissions.key matches COLUMN_DEFINITIONS.key"
 
   %% =================================================================
   %% INDEXES & CONSTRAINTS (Firestore Rules + Composite Indexes)

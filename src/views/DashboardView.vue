@@ -282,7 +282,7 @@ async function handleLogout() {
           <table class="w-full text-sm">
             <thead>
               <tr class="border-b text-left text-gray-500">
-                <!-- Always show ID column -->
+                <!-- ID column -->
                 <th class="pb-2 pr-4 whitespace-nowrap">ID</th>
                 <!-- Dynamic columns based on role permissions -->
                 <th
@@ -292,10 +292,6 @@ async function handleLogout() {
                 >
                   {{ col.label }}
                 </th>
-                <!-- Always show system columns -->
-                <th class="pb-2 pr-4 whitespace-nowrap">Status</th>
-                <th class="pb-2 pr-4 whitespace-nowrap">Created By</th>
-                <th class="pb-2 whitespace-nowrap">Created At</th>
               </tr>
             </thead>
             <tbody>
@@ -316,30 +312,6 @@ async function handleLogout() {
                 >
                   {{
                     formatValue(getOrderFieldValue(order, col.key), col.type)
-                  }}
-                </td>
-                <!-- Status column -->
-                <td class="py-2 pr-4">
-                  <span
-                    class="px-2 py-0.5 rounded-full text-xs font-medium"
-                    :class="{
-                      'bg-green-100 text-green-700': order.status === 'active',
-                      'bg-blue-100 text-blue-700': order.status === 'completed',
-                      'bg-gray-100 text-gray-500': order.status === 'cancelled',
-                    }"
-                    >{{ order.status }}</span
-                  >
-                </td>
-                <!-- Created By column -->
-                <td class="py-2 pr-4">
-                  {{ order.createdByName || order.createdBy }}
-                </td>
-                <!-- Created At column -->
-                <td class="py-2 text-gray-500">
-                  {{
-                    order.createdAt
-                      ? new Date(order.createdAt).toLocaleDateString()
-                      : "—"
                   }}
                 </td>
               </tr>
