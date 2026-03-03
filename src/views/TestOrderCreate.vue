@@ -655,6 +655,27 @@ async function handleCreatePending() {
       throw new Error("User not authenticated. Please log in first.");
     }
 
+    // Check if user has permission to edit this field
+    const fieldKey = createPendingData.value.field.replace(
+      "dynamic_fields.",
+      "",
+    );
+    const permission = columnsStore.getPermission(authStore.userRole, fieldKey);
+
+    console.log("[TestOrderCreate] Permission check:", {
+      role: authStore.userRole,
+      field: fieldKey,
+      permission: permission,
+    });
+
+    // If field is not editable and doesn't require approval, user cannot modify it at all
+    if (!permission.editable && !permission.requiresApproval) {
+      throw new Error(
+        `You do not have permission to modify the "${fieldKey}" field. ` +
+          `This field is read-only for your role (${authStore.userRole}).`,
+      );
+    }
+
     console.log(
       "Testing pendingsStore.createPending:",
       createPendingData.value,
@@ -1612,6 +1633,59 @@ async function handleCreatePending() {
             placeholder="e.g., order_value, customer_name, material_cost"
             class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
+
+          <!-- Permission indicator -->
+          <div
+            v-if="createPendingData.field && authStore.userRole"
+            class="mt-2"
+          >
+            <div
+              v-if="
+                columnsStore.getPermission(
+                  authStore.userRole,
+                  createPendingData.field.replace('dynamic_fields.', ''),
+                ).editable
+              "
+              class="text-xs text-green-600 flex items-center gap-1"
+            >
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                  fill-rule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+              <span>You can edit this field directly</span>
+            </div>
+            <div
+              v-else-if="
+                columnsStore.getPermission(
+                  authStore.userRole,
+                  createPendingData.field.replace('dynamic_fields.', ''),
+                ).requiresApproval
+              "
+              class="text-xs text-amber-600 flex items-center gap-1"
+            >
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                  fill-rule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+              <span>This field requires manager approval</span>
+            </div>
+            <div v-else class="text-xs text-red-600 flex items-center gap-1">
+              <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                  fill-rule="evenodd"
+                  d="M13.477 14.89A6 6 0 015.11 6.524l8.367 8.368zm1.414-1.414L6.524 5.11a6 6 0 018.367 8.367zM18 10a8 8 0 11-16 0 8 8 0 0116 0z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+              <span>You cannot modify this field (read-only)</span>
+            </div>
+          </div>
 
           <p class="text-xs text-gray-500 mt-1">
             <span v-if="availableFields.length > 0">
