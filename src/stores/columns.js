@@ -1,5 +1,5 @@
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { defineStore } from "pinia";
+import { ref, computed } from "vue";
 import {
   collection,
   doc,
@@ -9,21 +9,21 @@ import {
   serverTimestamp,
   orderBy,
   query,
-} from 'firebase/firestore'
-import { db } from '@/services/firebase'
-import { useAuthStore } from '@/stores/auth'
+} from "firebase/firestore";
+import { db } from "@/services/firebase";
+import { useAuthStore } from "@/stores/auth";
 
-export const useColumnsStore = defineStore('columns', () => {
+export const useColumnsStore = defineStore("columns", () => {
   // ---------------------------------------------------------------------------
   // State
   // ---------------------------------------------------------------------------
-  const definitions = ref([])         // ColumnDefinition[]
-  const permissions = ref({})         // Map<role, RolePermission>
-  const loading = ref(false)
-  const error = ref(null)
+  const definitions = ref([]); // ColumnDefinition[]
+  const permissions = ref({}); // Map<role, RolePermission>
+  const loading = ref(false);
+  const error = ref(null);
 
-  let unsubscribeColumns = null
-  let unsubscribePermissions = null
+  let unsubscribeColumns = null;
+  let unsubscribePermissions = null;
 
   // ---------------------------------------------------------------------------
   // Getters
@@ -32,70 +32,78 @@ export const useColumnsStore = defineStore('columns', () => {
   /**
    * Returns column definitions visible to the given role,
    * based on role_permissions. Used to render spreadsheet columns.
+   * System fields (systemField: true) are always visible to all roles.
    */
   const visibleColumns = computed(() => (role) => {
-    const rolePerms = permissions.value[role]
-    if (!rolePerms) return []
+    const rolePerms = permissions.value[role];
+    if (!rolePerms) return [];
     return definitions.value.filter((col) => {
-      const perm = rolePerms.permissions?.[col.key]
-      return perm?.visible === true
-    })
-  })
+      // System fields are always visible
+      if (col.systemField === true) {
+        return true;
+      }
+      // Non-system fields require permission
+      const perm = rolePerms.permissions?.[col.key];
+      return perm?.visible === true;
+    });
+  });
 
   /**
    * Returns column definitions editable by the given role.
    */
   const editableColumns = computed(() => (role) => {
-    const rolePerms = permissions.value[role]
-    if (!rolePerms) return []
+    const rolePerms = permissions.value[role];
+    if (!rolePerms) return [];
     return definitions.value.filter((col) => {
-      const perm = rolePerms.permissions?.[col.key]
-      return perm?.editable === true
-    })
-  })
+      const perm = rolePerms.permissions?.[col.key];
+      return perm?.editable === true;
+    });
+  });
 
   /**
    * Returns column definitions that require approval for the given role.
    */
   const approvalColumns = computed(() => (role) => {
-    const rolePerms = permissions.value[role]
-    if (!rolePerms) return []
+    const rolePerms = permissions.value[role];
+    if (!rolePerms) return [];
     return definitions.value.filter((col) => {
-      const perm = rolePerms.permissions?.[col.key]
-      return perm?.requiresApproval === true
-    })
-  })
+      const perm = rolePerms.permissions?.[col.key];
+      return perm?.requiresApproval === true;
+    });
+  });
 
   /**
    * Returns a permission entry for a specific role and column key.
    */
   const getPermission = computed(() => (role, columnKey) => {
-    return permissions.value[role]?.permissions?.[columnKey] ?? {
-      visible: false,
-      editable: false,
-      requiresApproval: false,
-    }
-  })
+    return (
+      permissions.value[role]?.permissions?.[columnKey] ?? {
+        visible: false,
+        editable: false,
+        requiresApproval: false,
+      }
+    );
+  });
 
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
   function handleError(err) {
-    console.error('[columns]', err)
-    if (err.code === 'permission-denied') {
-      error.value = 'You do not have permission to manage columns.'
+    console.error("[columns]", err);
+    if (err.code === "permission-denied") {
+      error.value = "You do not have permission to manage columns.";
     } else {
-      error.value = err.message || 'An unexpected error occurred.'
+      error.value = err.message || "An unexpected error occurred.";
     }
   }
 
   function convertTimestamps(data) {
-    const result = { ...data }
-    const tsFields = ['createdAt', 'updatedAt']
+    const result = { ...data };
+    const tsFields = ["createdAt", "updatedAt"];
     for (const field of tsFields) {
-      if (result[field]?.toDate) result[field] = result[field].toDate()
+      if (result[field]?.toDate) result[field] = result[field].toDate();
     }
-    return result
+    return result;
   }
 
   // ---------------------------------------------------------------------------
@@ -107,50 +115,50 @@ export const useColumnsStore = defineStore('columns', () => {
    * Both collections are needed to render the spreadsheet correctly.
    */
   function fetchColumns() {
-    loading.value = true
-    error.value = null
+    loading.value = true;
+    error.value = null;
 
     // Listen to column_definitions
     const colQuery = query(
-      collection(db, 'column_definitions'),
-      orderBy('order', 'asc')
-    )
+      collection(db, "column_definitions"),
+      orderBy("order", "asc"),
+    );
 
     unsubscribeColumns = onSnapshot(
       colQuery,
       (snapshot) => {
-        const cols = []
+        const cols = [];
         snapshot.forEach((docSnap) => {
-          cols.push({ key: docSnap.id, ...convertTimestamps(docSnap.data()) })
-        })
-        definitions.value = cols
-        loading.value = false
+          cols.push({ key: docSnap.id, ...convertTimestamps(docSnap.data()) });
+        });
+        definitions.value = cols;
+        loading.value = false;
       },
       (err) => {
-        handleError(err)
-        loading.value = false
-      }
-    )
+        handleError(err);
+        loading.value = false;
+      },
+    );
 
     // Listen to role_permissions
     unsubscribePermissions = onSnapshot(
-      collection(db, 'role_permissions'),
+      collection(db, "role_permissions"),
       (snapshot) => {
-        const perms = {}
+        const perms = {};
         snapshot.forEach((docSnap) => {
-          const data = docSnap.data()
+          const data = docSnap.data();
           perms[docSnap.id] = {
             role: docSnap.id,
             ...data,
             updatedAt: data.updatedAt?.toDate?.() ?? null,
-          }
-        })
-        permissions.value = perms
+          };
+        });
+        permissions.value = perms;
       },
       (err) => {
-        handleError(err)
-      }
-    )
+        handleError(err);
+      },
+    );
   }
 
   /**
@@ -159,44 +167,44 @@ export const useColumnsStore = defineStore('columns', () => {
    * Changes to label/order on isDataRelated=false columns are always allowed.
    */
   async function updateColumn(key, changes) {
-    const authStore = useAuthStore()
-    error.value = null
+    const authStore = useAuthStore();
+    error.value = null;
 
-    if (authStore.userRole !== 'super_admin') {
-      error.value = 'Only Super Admins can update column definitions.'
-      throw new Error(error.value)
+    if (authStore.userRole !== "super_admin") {
+      error.value = "Only Super Admins can update column definitions.";
+      throw new Error(error.value);
     }
 
-    const column = definitions.value.find((c) => c.key === key)
+    const column = definitions.value.find((c) => c.key === key);
     if (!column) {
-      error.value = 'Column not found.'
-      return
+      error.value = "Column not found.";
+      return;
     }
 
     // Client-side guard for T-DATA-005: block type change on data-related columns
     // Firestore rules enforce this as well, but we provide early feedback here.
     if (column.isDataRelated && changes.type && changes.type !== column.type) {
       error.value =
-        'Cannot change the type of a data-related column when data exists. ' +
-        'Set isDataRelated=false first, or ensure no order data exists for this column.'
-      throw new Error(error.value)
+        "Cannot change the type of a data-related column when data exists. " +
+        "Set isDataRelated=false first, or ensure no order data exists for this column.";
+      throw new Error(error.value);
     }
 
     // Optimistic update
-    const idx = definitions.value.findIndex((c) => c.key === key)
-    const previous = { ...definitions.value[idx] }
-    definitions.value[idx] = { ...previous, ...changes }
+    const idx = definitions.value.findIndex((c) => c.key === key);
+    const previous = { ...definitions.value[idx] };
+    definitions.value[idx] = { ...previous, ...changes };
 
     try {
-      await updateDoc(doc(db, 'column_definitions', key), {
+      await updateDoc(doc(db, "column_definitions", key), {
         ...changes,
         updatedAt: serverTimestamp(),
-      })
+      });
     } catch (err) {
       // Revert
-      definitions.value[idx] = previous
-      handleError(err)
-      throw err
+      definitions.value[idx] = previous;
+      handleError(err);
+      throw err;
     }
   }
 
@@ -205,32 +213,34 @@ export const useColumnsStore = defineStore('columns', () => {
    * Super Admin only; 2nd approval enforced via Cloud Function (T-AUTHZ-004).
    */
   async function updateRolePermissions(role, newPermissions) {
-    const authStore = useAuthStore()
-    error.value = null
+    const authStore = useAuthStore();
+    error.value = null;
 
-    if (authStore.userRole !== 'super_admin') {
-      error.value = 'Only Super Admins can update role permissions.'
-      throw new Error(error.value)
+    if (authStore.userRole !== "super_admin") {
+      error.value = "Only Super Admins can update role permissions.";
+      throw new Error(error.value);
     }
 
-    const previous = permissions.value[role] ? { ...permissions.value[role] } : null
+    const previous = permissions.value[role]
+      ? { ...permissions.value[role] }
+      : null;
 
     // Optimistic update
     permissions.value[role] = {
       ...permissions.value[role],
       permissions: newPermissions,
-    }
+    };
 
     try {
-      await updateDoc(doc(db, 'role_permissions', role), {
+      await updateDoc(doc(db, "role_permissions", role), {
         permissions: newPermissions,
         updatedAt: serverTimestamp(),
         updatedBy: authStore.user.uid,
-      })
+      });
     } catch (err) {
-      if (previous) permissions.value[role] = previous
-      handleError(err)
-      throw err
+      if (previous) permissions.value[role] = previous;
+      handleError(err);
+      throw err;
     }
   }
 
@@ -239,17 +249,17 @@ export const useColumnsStore = defineStore('columns', () => {
    */
   function cleanup() {
     if (unsubscribeColumns) {
-      unsubscribeColumns()
-      unsubscribeColumns = null
+      unsubscribeColumns();
+      unsubscribeColumns = null;
     }
     if (unsubscribePermissions) {
-      unsubscribePermissions()
-      unsubscribePermissions = null
+      unsubscribePermissions();
+      unsubscribePermissions = null;
     }
-    definitions.value = []
-    permissions.value = {}
-    loading.value = false
-    error.value = null
+    definitions.value = [];
+    permissions.value = {};
+    loading.value = false;
+    error.value = null;
   }
 
   return {
@@ -268,5 +278,5 @@ export const useColumnsStore = defineStore('columns', () => {
     updateColumn,
     updateRolePermissions,
     cleanup,
-  }
-})
+  };
+});

@@ -60,11 +60,60 @@ function getOrderFieldValue(order, columnKey) {
 function formatValue(value, columnType) {
   if (value === null || value === undefined || value === "") return "—";
 
-  if (columnType === "date" && value) {
+  // FIRST: Check for Date objects and Firestore Timestamps (regardless of column type)
+  // This handles createdAt, updatedAt, etc.
+  if (typeof value === "object" && value !== null) {
+    // JavaScript Date object (already converted from Firestore Timestamp)
+    if (value instanceof Date) {
+      const dateStr = value.toLocaleDateString();
+      const timeStr = value.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+      return `${dateStr} ${timeStr}`;
+    }
+    // Firestore Timestamp with toDate method
+    if (value.toDate && typeof value.toDate === "function") {
+      const date = value.toDate();
+      const dateStr = date.toLocaleDateString();
+      const timeStr = date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+      return `${dateStr} ${timeStr}`;
+    }
+    // Firestore Timestamp as plain object with seconds/nanoseconds
+    if (typeof value.seconds === "number") {
+      const date = new Date(value.seconds * 1000);
+      const dateStr = date.toLocaleDateString();
+      const timeStr = date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+      return `${dateStr} ${timeStr}`;
+    }
+  }
+
+  // Handle explicit date/timestamp column type with string values
+  if ((columnType === "date" || columnType === "timestamp") && value) {
     try {
-      return new Date(value).toLocaleDateString();
+      const date = new Date(value);
+      const dateStr = date.toLocaleDateString();
+      const timeStr = date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+      return `${dateStr} ${timeStr}`;
     } catch {
-      return value;
+      return String(value);
     }
   }
 
