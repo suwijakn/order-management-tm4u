@@ -5,6 +5,8 @@ import { useOrdersStore } from "@/stores/orders";
 import { useColumnsStore } from "@/stores/columns";
 import { usePendingsStore } from "@/stores/pendings";
 import { useRouter } from "vue-router";
+import ModernDashboardLayout from "@/layouts/ModernDashboardLayout.vue";
+import SkeletonLoader from "@/components/SkeletonLoader.vue";
 
 const authStore = useAuthStore();
 const ordersStore = useOrdersStore();
@@ -14,6 +16,11 @@ const router = useRouter();
 
 // Default to current month in YYYY-MM format, but allow user to change
 const selectedMonth = ref(new Date().toISOString().slice(0, 7));
+
+// Handle month change from layout
+function handleMonthChange(newMonth) {
+  selectedMonth.value = newMonth;
+}
 
 // Check if user has allowed role for dashboard access
 const allowedRoles = ["super_admin", "manager", "jr_sales", "sr_sales"];
@@ -283,138 +290,72 @@ async function handleLogout() {
     </div>
   </div>
 
-  <!-- Dashboard Content (only shown if authorized) -->
-  <div v-else-if="isAuthorized" class="min-h-screen bg-gray-50">
-    <!-- Header -->
-    <header class="bg-white shadow-sm border-b border-gray-200">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="flex justify-between items-center h-16">
-          <div class="flex items-center">
-            <h1 class="text-xl font-semibold text-gray-900">
-              Order Management
-            </h1>
-          </div>
-          <div class="flex items-center space-x-4">
-            <!-- Pending Approvals Badge (Manager/Super Admin only) -->
-            <router-link
-              v-if="isManagerOrAbove"
-              to="/pending-approvals"
-              class="relative text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
-            >
-              <svg
-                class="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-                />
-              </svg>
-              <span>Pending Approvals</span>
-              <!-- Badge count -->
-              <span
-                v-if="pendingCount > 0"
-                class="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center"
-              >
-                {{ pendingCount > 99 ? "99+" : pendingCount }}
-              </span>
-            </router-link>
+  <!-- Dashboard Content with Layout (only shown if authorized) -->
+  <ModernDashboardLayout
+    v-else-if="isAuthorized"
+    @month-change="handleMonthChange"
+  >
+    <template #title>Spreadsheet</template>
 
-            <router-link
-              to="/test-order-create"
-              class="text-sm text-blue-600 hover:text-blue-800"
-            >
-              Test Order Create
-            </router-link>
-            <span class="text-sm text-gray-600">
-              {{ authStore.userName }}
-            </span>
-            <div class="text-xs px-2 py-1 bg-gray-100 rounded">
-              Role: {{ authStore.userRole || "NO_CUSTOM_CLAIMS" }}
-            </div>
-            <button @click="handleLogout" class="btn-secondary text-sm">
-              Logout
-            </button>
-          </div>
-        </div>
-      </div>
-    </header>
+    <!-- Welcome section -->
+    <div class="mb-6">
+      <h2 class="text-2xl font-bold text-gray-900">Dashboard</h2>
+      <p class="text-gray-600 mt-1">Welcome to the Order Management System</p>
+    </div>
 
-    <!-- Main Content -->
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div class="mb-8">
-        <div class="flex justify-between items-center">
-          <div>
-            <h2 class="text-2xl font-bold text-gray-900">Dashboard</h2>
-            <p class="text-gray-600 mt-1">
-              Welcome to the Order Management System
-            </p>
-          </div>
-
-          <!-- Month Selector -->
-          <div class="flex items-center gap-2">
-            <label class="text-sm font-medium text-gray-700">Month:</label>
-            <input
-              v-model="selectedMonth"
-              type="month"
-              class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        </div>
-      </div>
-
-      <!-- Stat Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <div class="card">
+    <!-- Stat Cards with Skeleton Loaders -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <template v-if="ordersStore.loading">
+        <SkeletonLoader v-for="i in 4" :key="i" type="stat" />
+      </template>
+      <template v-else>
+        <div class="bg-white rounded-lg shadow p-6">
           <div class="text-sm text-gray-500">Total Orders</div>
           <div class="text-3xl font-bold text-gray-900 mt-2">
-            {{ ordersStore.loading ? "…" : totalOrders }}
+            {{ totalOrders }}
           </div>
         </div>
-        <div class="card">
+        <div class="bg-white rounded-lg shadow p-6">
           <div class="text-sm text-gray-500">Active</div>
           <div class="text-3xl font-bold text-yellow-600 mt-2">
-            {{ ordersStore.loading ? "…" : pendingOrders }}
+            {{ pendingOrders }}
           </div>
         </div>
-        <div class="card">
+        <div class="bg-white rounded-lg shadow p-6">
           <div class="text-sm text-gray-500">Completed</div>
           <div class="text-3xl font-bold text-green-600 mt-2">
-            {{ ordersStore.loading ? "…" : completedOrders }}
+            {{ completedOrders }}
           </div>
         </div>
-        <div class="card">
+        <div class="bg-white rounded-lg shadow p-6">
           <div class="text-sm text-gray-500">Month</div>
-          <div class="text-3xl font-bold text-primary-600 mt-2">
+          <div class="text-3xl font-bold text-blue-600 mt-2">
             {{ selectedMonth }}
           </div>
         </div>
-      </div>
+      </template>
+    </div>
 
-      <!-- Error banner -->
-      <div
-        v-if="ordersStore.error"
-        class="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm"
-      >
-        {{ ordersStore.error }}
-      </div>
+    <!-- Error banner -->
+    <div
+      v-if="ordersStore.error"
+      class="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm"
+    >
+      {{ ordersStore.error }}
+    </div>
 
-      <!-- Orders List -->
-      <div class="card">
-        <h3 class="text-lg font-semibold text-gray-900 mb-4">
+    <!-- Orders List -->
+    <div class="bg-white rounded-lg shadow">
+      <div class="px-6 py-4 border-b border-gray-200">
+        <h3 class="text-lg font-semibold text-gray-900">
           Orders — {{ selectedMonth }}
         </h3>
+      </div>
 
-        <!-- Loading state -->
-        <div
-          v-if="ordersStore.loading || columnsStore.loading"
-          class="text-gray-400 text-center py-8"
-        >
-          Loading…
+      <div class="p-6">
+        <!-- Loading state with skeleton -->
+        <div v-if="ordersStore.loading || columnsStore.loading">
+          <SkeletonLoader type="table" :lines="5" />
         </div>
 
         <!-- No orders -->
@@ -422,7 +363,21 @@ async function handleLogout() {
           v-else-if="ordersStore.activeOrders.length === 0"
           class="text-gray-500 text-center py-8"
         >
-          No orders for {{ selectedMonth }}.
+          <svg
+            class="w-12 h-12 mx-auto text-gray-300 mb-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+            />
+          </svg>
+          <p>No orders for {{ selectedMonth }}.</p>
+          <p class="text-sm mt-1">Try selecting a different month.</p>
         </div>
 
         <!-- No columns visible for this role -->
@@ -430,8 +385,23 @@ async function handleLogout() {
           v-else-if="visibleColumns.length === 0"
           class="text-gray-500 text-center py-8"
         >
-          No columns are visible for your role ({{ authStore.userRole }}).
-          <p class="text-xs mt-2">
+          <svg
+            class="w-12 h-12 mx-auto text-gray-300 mb-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+            />
+          </svg>
+          <p>
+            No columns are visible for your role ({{ authStore.userRole }}).
+          </p>
+          <p class="text-sm mt-1">
             Contact your administrator to configure column permissions.
           </p>
         </div>
@@ -442,12 +412,12 @@ async function handleLogout() {
             <thead>
               <tr class="border-b text-left text-gray-500">
                 <!-- ID column -->
-                <th class="pb-2 pr-4 whitespace-nowrap">ID</th>
+                <th class="pb-3 pr-4 whitespace-nowrap font-medium">ID</th>
                 <!-- Dynamic columns based on role permissions -->
                 <th
                   v-for="col in visibleColumns"
                   :key="col.key"
-                  class="pb-2 pr-4 whitespace-nowrap"
+                  class="pb-3 pr-4 whitespace-nowrap font-medium"
                 >
                   {{ col.label }}
                 </th>
@@ -457,17 +427,17 @@ async function handleLogout() {
               <tr
                 v-for="order in ordersStore.activeOrders"
                 :key="order.id"
-                class="border-b last:border-0 hover:bg-gray-50"
+                class="border-b last:border-0 hover:bg-gray-50 transition-colors"
               >
                 <!-- ID column -->
-                <td class="py-2 pr-4 font-mono text-xs text-gray-500">
+                <td class="py-3 pr-4 font-mono text-xs text-gray-500">
                   {{ order.id.slice(0, 8) }}…
                 </td>
                 <!-- Dynamic columns -->
                 <td
                   v-for="col in visibleColumns"
                   :key="col.key"
-                  class="py-2 pr-4"
+                  class="py-3 pr-4"
                 >
                   <div class="flex items-center gap-1">
                     <span>{{
@@ -541,6 +511,6 @@ async function handleLogout() {
           </table>
         </div>
       </div>
-    </main>
-  </div>
+    </div>
+  </ModernDashboardLayout>
 </template>
