@@ -3,11 +3,13 @@ import { onMounted, onUnmounted, computed, ref, watch } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import { useOrdersStore } from "@/stores/orders";
 import { useColumnsStore } from "@/stores/columns";
+import { usePendingsStore } from "@/stores/pendings";
 import { useRouter } from "vue-router";
 
 const authStore = useAuthStore();
 const ordersStore = useOrdersStore();
 const columnsStore = useColumnsStore();
+const pendingsStore = usePendingsStore();
 const router = useRouter();
 
 // Default to current month in YYYY-MM format, but allow user to change
@@ -73,6 +75,53 @@ function formatValue(value, columnType) {
   return value;
 }
 
+// Check if user is Manager or Super Admin (can approve/reject pendings)
+const isManagerOrAbove = computed(() => {
+  return ["manager", "super_admin"].includes(authStore.userRole);
+});
+
+// Count of pending changes for notification badge (only for managers)
+const pendingCount = computed(() => {
+  return pendingsStore.allPendingItems.length;
+});
+
+// Get pending change for a specific order + field combination
+function getPendingForField(orderId, fieldKey) {
+  return pendingsStore.allPendingItems.find(
+    (p) => p.targetId === orderId && p.field === fieldKey,
+  );
+}
+
+// Check if a field has a pending change
+function hasPendingChange(orderId, fieldKey) {
+  return !!getPendingForField(orderId, fieldKey);
+}
+
+// Format date for tooltip display
+function formatDateTime(date) {
+  if (!date) return "—";
+  try {
+    return new Date(date).toLocaleString();
+  } catch {
+    return "—";
+  }
+}
+
+// Tooltip state
+const activeTooltip = ref(null);
+
+function showTooltip(orderId, fieldKey) {
+  activeTooltip.value = `${orderId}_${fieldKey}`;
+}
+
+function hideTooltip() {
+  activeTooltip.value = null;
+}
+
+function isTooltipVisible(orderId, fieldKey) {
+  return activeTooltip.value === `${orderId}_${fieldKey}`;
+}
+
 onMounted(() => {
   console.log(
     "[Dashboard] Mounting, fetching orders for:",
@@ -83,11 +132,15 @@ onMounted(() => {
   // Fetch column definitions and role permissions
   columnsStore.fetchColumns();
   ordersStore.fetchOrders(selectedMonth.value);
+
+  // Fetch all pending changes for field indicators
+  pendingsStore.fetchAllPendings();
 });
 
 onUnmounted(() => {
   ordersStore.cleanup();
   columnsStore.cleanup();
+  pendingsStore.cleanup();
 });
 
 const totalOrders = computed(() => ordersStore.activeOrders.length);
@@ -165,6 +218,35 @@ async function handleLogout() {
             </h1>
           </div>
           <div class="flex items-center space-x-4">
+            <!-- Pending Approvals Badge (Manager/Super Admin only) -->
+            <router-link
+              v-if="isManagerOrAbove"
+              to="/pending-approvals"
+              class="relative text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
+            >
+              <svg
+                class="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+                />
+              </svg>
+              <span>Pending Approvals</span>
+              <!-- Badge count -->
+              <span
+                v-if="pendingCount > 0"
+                class="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center"
+              >
+                {{ pendingCount > 99 ? "99+" : pendingCount }}
+              </span>
+            </router-link>
+
             <router-link
               to="/test-order-create"
               class="text-sm text-blue-600 hover:text-blue-800"
@@ -310,9 +392,77 @@ async function handleLogout() {
                   :key="col.key"
                   class="py-2 pr-4"
                 >
-                  {{
-                    formatValue(getOrderFieldValue(order, col.key), col.type)
-                  }}
+                  <div class="flex items-center gap-1">
+                    <span>{{
+                      formatValue(getOrderFieldValue(order, col.key), col.type)
+                    }}</span>
+
+                    <!-- Pending change indicator -->
+                    <div
+                      v-if="hasPendingChange(order.id, col.key)"
+                      class="relative inline-block"
+                      @mouseenter="showTooltip(order.id, col.key)"
+                      @mouseleave="hideTooltip()"
+                    >
+                      <!-- Warning icon -->
+                      <svg
+                        class="w-4 h-4 text-amber-500 cursor-help"
+                        fill="currentColor"
+                        viewBox="0 0 20 20"
+                      >
+                        <path
+                          fill-rule="evenodd"
+                          d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                          clip-rule="evenodd"
+                        />
+                      </svg>
+
+                      <!-- Tooltip -->
+                      <div
+                        v-if="isTooltipVisible(order.id, col.key)"
+                        class="absolute z-50 bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 bg-gray-900 text-white text-xs rounded-lg shadow-lg p-3"
+                      >
+                        <div class="font-semibold text-amber-400 mb-2">
+                          ⏳ Pending Change Request
+                        </div>
+                        <div class="space-y-1">
+                          <div>
+                            <span class="text-gray-400">Requested by:</span>
+                            <span class="ml-1">{{
+                              getPendingForField(order.id, col.key)
+                                ?.requestedByName
+                            }}</span>
+                          </div>
+                          <div>
+                            <span class="text-gray-400">Requested at:</span>
+                            <span class="ml-1">{{
+                              formatDateTime(
+                                getPendingForField(order.id, col.key)
+                                  ?.requestedAt,
+                              )
+                            }}</span>
+                          </div>
+                          <div>
+                            <span class="text-gray-400">Current value:</span>
+                            <span class="ml-1 text-gray-300">{{
+                              getPendingForField(order.id, col.key)
+                                ?.baseValue ?? "—"
+                            }}</span>
+                          </div>
+                          <div>
+                            <span class="text-gray-400">New value:</span>
+                            <span class="ml-1 text-green-400 font-medium">{{
+                              getPendingForField(order.id, col.key)?.newValue
+                            }}</span>
+                          </div>
+                        </div>
+                        <!-- Arrow -->
+                        <div
+                          class="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900"
+                        ></div>
+                      </div>
+                    </div>
+                  </div>
                 </td>
               </tr>
             </tbody>

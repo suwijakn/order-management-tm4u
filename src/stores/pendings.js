@@ -370,8 +370,10 @@ export const usePendingsStore = defineStore("pendings", () => {
    * Reject a pending change. Manager+ only.
    * Increments rejectionCount. T-LOGIC-003: cooldown after rejection
    * is enforced by Cloud Function.
+   * @param {string} pendingId - The ID of the pending change to reject
+   * @param {string} comment - Optional rejection comment/reason
    */
-  async function rejectPending(pendingId) {
+  async function rejectPending(pendingId, comment = "") {
     const authStore = useAuthStore();
     error.value = null;
 
@@ -390,6 +392,8 @@ export const usePendingsStore = defineStore("pendings", () => {
         ...pendings.value[idx],
         status: "rejected",
         reviewedBy: authStore.user.uid,
+        reviewedByName: authStore.user.displayName || authStore.userEmail,
+        rejectionComment: comment,
         statusUpdatedAt: new Date(),
         rejectionCount: currentRejectionCount + 1,
       };
@@ -399,6 +403,8 @@ export const usePendingsStore = defineStore("pendings", () => {
       await updateDoc(doc(db, "pending_changes", pendingId), {
         status: "rejected",
         reviewedBy: authStore.user.uid,
+        reviewedByName: authStore.user.displayName || authStore.userEmail,
+        rejectionComment: comment,
         statusUpdatedAt: serverTimestamp(),
         rejectionCount: currentRejectionCount + 1,
       });

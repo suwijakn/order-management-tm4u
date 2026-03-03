@@ -11,6 +11,11 @@ const action = ref(null);
 const processingAll = ref(false);
 const actionType = ref(null);
 
+// Rejection comment modal state
+const showRejectModal = ref(false);
+const rejectingPendingId = ref(null);
+const rejectionComment = ref("");
+
 const pendingItems = computed(() => pendingsStore.pendingItems);
 const pendingCount = computed(() => pendingsStore.pendingItems.length);
 
@@ -37,18 +42,43 @@ async function handleApprove(pendingId) {
   }
 }
 
-async function handleReject(pendingId) {
-  processingId.value = pendingId;
+// Open rejection modal
+function openRejectModal(pendingId) {
+  rejectingPendingId.value = pendingId;
+  rejectionComment.value = "";
+  showRejectModal.value = true;
+}
+
+// Close rejection modal
+function closeRejectModal() {
+  showRejectModal.value = false;
+  rejectingPendingId.value = null;
+  rejectionComment.value = "";
+}
+
+// Confirm rejection with comment
+async function confirmReject() {
+  if (!rejectingPendingId.value) return;
+
+  processingId.value = rejectingPendingId.value;
   action.value = "reject";
 
   try {
-    await pendingsStore.rejectPending(pendingId);
+    await pendingsStore.rejectPending(
+      rejectingPendingId.value,
+      rejectionComment.value,
+    );
+    closeRejectModal();
   } catch (error) {
     console.error("Failed to reject:", error);
   } finally {
     processingId.value = null;
     action.value = null;
   }
+}
+
+async function handleReject(pendingId) {
+  openRejectModal(pendingId);
 }
 
 async function handleApproveAll() {
@@ -366,6 +396,50 @@ function formatDate(date) {
                 <span v-else>Approve</span>
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Rejection Comment Modal -->
+      <div
+        v-if="showRejectModal"
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+        @click.self="closeRejectModal"
+      >
+        <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+          <h3 class="text-lg font-semibold text-gray-900 mb-4">
+            Reject Change Request
+          </h3>
+
+          <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+              Rejection Comment (optional)
+            </label>
+            <textarea
+              v-model="rejectionComment"
+              rows="3"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
+              placeholder="Provide a reason for rejection..."
+            ></textarea>
+          </div>
+
+          <div class="flex justify-end gap-3">
+            <button
+              @click="closeRejectModal"
+              class="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              @click="confirmReject"
+              :disabled="processingId === rejectingPendingId"
+              class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+            >
+              <span v-if="processingId === rejectingPendingId"
+                >Rejecting...</span
+              >
+              <span v-else>Confirm Reject</span>
+            </button>
           </div>
         </div>
       </div>

@@ -51,6 +51,12 @@ const routes = [
     component: TestOrderCreate,
     meta: { requiresAuth: true, requiresEmailVerification: true },
   },
+  {
+    path: "/pending-approvals",
+    name: "PendingApprovals",
+    component: PendingReviewView,
+    meta: { requiresAuth: true, requiresEmailVerification: true },
+  },
 ];
 
 const router = createRouter({
