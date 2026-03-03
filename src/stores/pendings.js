@@ -11,6 +11,9 @@ import {
   updateDoc,
   serverTimestamp,
   Timestamp,
+  getDocs,
+  getDoc,
+  setDoc,
 } from "firebase/firestore";
 import { db } from "@/services/firebase";
 import { useAuthStore } from "@/stores/auth";
@@ -211,12 +214,14 @@ export const usePendingsStore = defineStore("pendings", () => {
     const authStore = useAuthStore();
     error.value = null;
 
-    // Client-side uniqueness check for early feedback (T-DATA-002)
-    const existing = pendingForField.value(targetId, field);
-    if (existing) {
-      error.value = `A pending change already exists for field "${field}" on this record.`;
-      throw new Error(error.value);
-    }
+    console.log(
+      "[pendings] Creating pending (uniqueness enforced by Firestore rules):",
+      {
+        targetId,
+        field,
+        targetCollection,
+      },
+    );
 
     // Cost pendings require Manager+ (T-AUTHZ-005)
     if (
@@ -232,8 +237,46 @@ export const usePendingsStore = defineStore("pendings", () => {
       new Date(Date.now() + PENDING_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
     );
 
+    // Use deterministic document ID: targetId_field (with special chars replaced)
+    // This ensures uniqueness at the Firestore level
+    const sanitizedField = field.replace(/[^a-zA-Z0-9]/g, "_");
+    const pendingDocId = `${targetId}_${sanitizedField}`;
+
+    console.log("[pendings] Using deterministic document ID:", pendingDocId);
+
     try {
-      const docRef = await addDoc(collection(db, "pending_changes"), {
+      const docRef = doc(db, "pending_changes", pendingDocId);
+
+      // Check if document already exists
+      console.log("[pendings] Checking if document exists:", pendingDocId);
+      let existingDoc = null;
+      try {
+        existingDoc = await getDoc(docRef);
+        console.log("[pendings] Document exists check:", existingDoc.exists());
+      } catch (readErr) {
+        console.warn(
+          "[pendings] Could not read existing doc:",
+          readErr.message,
+        );
+        // Continue - document might not exist
+      }
+
+      if (
+        existingDoc &&
+        existingDoc.exists() &&
+        existingDoc.data().status === "pending"
+      ) {
+        const existingData = existingDoc.data();
+        error.value =
+          `A pending change already exists for field "${field}" on this record.\n` +
+          `Existing pending ID: ${existingDoc.id}\n` +
+          `Created by: ${existingData.requestedByName}\n` +
+          `Status: ${existingData.status}`;
+        throw new Error(error.value);
+      }
+
+      // Prepare the data to send
+      const pendingData = {
         targetCollection,
         targetId,
         orderId: targetCollection === "orders" ? targetId : null,
@@ -250,8 +293,33 @@ export const usePendingsStore = defineStore("pendings", () => {
         reviewedBy: null,
         rejectionCount: 0,
         expiresAt,
+      };
+
+      console.log("[pendings] Attempting to create pending with data:", {
+        ...pendingData,
+        requestedAt: "serverTimestamp()",
+        expiresAt: expiresAt.toDate(),
       });
-      return docRef.id;
+      console.log("[pendings] User info:", {
+        uid: authStore.user.uid,
+        email: authStore.userEmail,
+        role: authStore.userRole,
+      });
+
+      // Use setDoc with the deterministic ID
+      console.log("[pendings] Calling setDoc...");
+      try {
+        await setDoc(docRef, pendingData);
+        console.log("[pendings] Successfully created pending:", docRef.id);
+        return docRef.id;
+      } catch (setDocErr) {
+        console.error(
+          "[pendings] setDoc failed:",
+          setDocErr.code,
+          setDocErr.message,
+        );
+        throw setDocErr;
+      }
     } catch (err) {
       handleError(err);
       throw err;

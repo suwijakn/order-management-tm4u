@@ -138,6 +138,11 @@ watch(
 
 onMounted(() => {
   columnsStore.fetchColumns();
+
+  // Fetch pendings to enable uniqueness check
+  console.log("[TestOrderCreate] Fetching pendings for uniqueness check");
+  pendingsStore.fetchPendings();
+
   // Set current month in orders store with defensive check
   if (formData.value?.month) {
     ordersStore.currentMonth = formData.value.month;
@@ -153,6 +158,7 @@ onMounted(() => {
 onUnmounted(() => {
   columnsStore.cleanup();
   ordersStore.cleanup();
+  pendingsStore.cleanup();
 });
 
 async function handleCreateOrder() {
@@ -496,22 +502,28 @@ async function handleCreateCost() {
 const createPendingData = ref({
   targetCollection: "orders",
   targetId: "", // Will be filled from selected order
-  field: "order_value",
+  orderMonth: null, // Will be fetched from Firestore
+  field: "customer_name", // Changed to a common field that exists
   baseValue: null, // Will be fetched from Firestore
   baseVersion: null, // Will be fetched from Firestore
-  newValue: 12000,
+  newValue: "Updated Company Name",
 });
 
 const createPendingLoading = ref(false);
 const createPendingError = ref(null);
 const createPendingSuccess = ref(null);
 const fetchingTargetData = ref(false);
+const availableFields = ref([]); // Store available fields from document
 
 // Check if user can create pending changes
 const canCreatePending = computed(() => {
-  const role = authStore.userRole;
   return (
-    role && ["super_admin", "manager", "jr_sales", "sr_sales"].includes(role)
+    authStore.isAuthenticated &&
+    authStore.user &&
+    authStore.userRole &&
+    ["super_admin", "manager", "jr_sales", "sr_sales"].includes(
+      authStore.userRole,
+    )
   );
 });
 
@@ -520,6 +532,7 @@ async function fetchTargetData() {
   if (!createPendingData.value.targetId || !createPendingData.value.field) {
     createPendingData.value.baseValue = null;
     createPendingData.value.baseVersion = null;
+    createPendingData.value.orderMonth = null;
     return;
   }
 
@@ -541,6 +554,43 @@ async function fetchTargetData() {
     if (docSnap.exists()) {
       const data = docSnap.data();
       createPendingData.value.baseVersion = data.version || 1;
+      createPendingData.value.orderMonth = data.month || null;
+
+      // Build list of available fields
+      const fields = [];
+
+      // Add top-level fields (excluding internal ones)
+      const topLevelFields = Object.keys(data).filter(
+        (key) =>
+          ![
+            "id",
+            "version",
+            "month",
+            "status",
+            "createdBy",
+            "createdByName",
+            "createdAt",
+            "updatedAt",
+            "deletedAt",
+            "deletedBy",
+          ].includes(key),
+      );
+      fields.push(...topLevelFields);
+
+      // Add dynamic_fields if they exist
+      if (data.dynamic_fields) {
+        const dynamicFieldNames = Object.keys(data.dynamic_fields).map(
+          (key) => `dynamic_fields.${key}`,
+        );
+        fields.push(...dynamicFieldNames);
+      }
+
+      availableFields.value = fields;
+
+      // Debug: Show all available fields
+      console.log("[pending] All fields in document:", Object.keys(data));
+      console.log("[pending] Document data:", data);
+      console.log("[pending] Available fields for pending:", fields);
 
       // Get the current value for the specified field
       if (createPendingData.value.field.startsWith("dynamic_fields.")) {
@@ -550,24 +600,37 @@ async function fetchTargetData() {
         );
         createPendingData.value.baseValue =
           data.dynamic_fields?.[fieldName] || null;
+        console.log("[pending] Dynamic field lookup:", {
+          fieldName,
+          dynamicFields: data.dynamic_fields,
+          foundValue: createPendingData.value.baseValue,
+        });
       } else {
         createPendingData.value.baseValue =
           data[createPendingData.value.field] || null;
+        console.log("[pending] Regular field lookup:", {
+          fieldName: createPendingData.value.field,
+          foundValue: createPendingData.value.baseValue,
+          availableFields: Object.keys(data),
+        });
       }
 
       console.log("Fetched target data:", {
         baseValue: createPendingData.value.baseValue,
         baseVersion: createPendingData.value.baseVersion,
+        orderMonth: createPendingData.value.orderMonth,
       });
     } else {
       createPendingData.value.baseValue = null;
       createPendingData.value.baseVersion = null;
+      createPendingData.value.orderMonth = null;
       console.warn("Target document not found");
     }
   } catch (err) {
     console.error("Error fetching target data:", err);
     createPendingData.value.baseValue = null;
     createPendingData.value.baseVersion = null;
+    createPendingData.value.orderMonth = null;
   } finally {
     fetchingTargetData.value = false;
   }
@@ -587,12 +650,19 @@ async function handleCreatePending() {
   createPendingSuccess.value = null;
 
   try {
+    // Check authentication first
+    if (!authStore.isAuthenticated || !authStore.user) {
+      throw new Error("User not authenticated. Please log in first.");
+    }
+
     console.log(
       "Testing pendingsStore.createPending:",
       createPendingData.value,
     );
     console.log("User role:", authStore.userRole);
     console.log("Can create pending:", canCreatePending.value);
+    console.log("User authenticated:", authStore.isAuthenticated);
+    console.log("User object:", authStore.user);
 
     const pendingId = await pendingsStore.createPending(
       createPendingData.value,
@@ -1517,12 +1587,41 @@ async function handleCreatePending() {
           <label class="block text-sm font-medium text-gray-700 mb-1"
             >Field to Change</label
           >
+
+          <!-- Show dropdown if fields are available -->
+          <select
+            v-if="availableFields.length > 0"
+            v-model="createPendingData.field"
+            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="" disabled>Select a field...</option>
+            <option
+              v-for="field in availableFields"
+              :key="field"
+              :value="field"
+            >
+              {{ field }}
+            </option>
+          </select>
+
+          <!-- Fallback to text input if no fields -->
           <input
+            v-else
             v-model="createPendingData.field"
             type="text"
             placeholder="e.g., order_value, customer_name, material_cost"
             class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
+
+          <p class="text-xs text-gray-500 mt-1">
+            <span v-if="availableFields.length > 0">
+              ✅ {{ availableFields.length }} fields available - select from
+              dropdown
+            </span>
+            <span v-else>
+              Select a target document to see available fields
+            </span>
+          </p>
         </div>
 
         <!-- Current Data (Fetched from Firestore) -->
@@ -1552,6 +1651,12 @@ async function handleCreatePending() {
               <span class="text-sm text-gray-600">Current Version:</span>
               <span class="text-sm font-medium text-gray-900">{{
                 createPendingData.baseVersion
+              }}</span>
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-sm text-gray-600">Order Month:</span>
+              <span class="text-sm font-medium text-gray-900">{{
+                createPendingData.orderMonth
               }}</span>
             </div>
           </div>
