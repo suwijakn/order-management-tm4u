@@ -13,9 +13,73 @@ const pendingsStore = usePendingsStore();
 // UI state
 const userMenuOpen = ref(false);
 const mobileMenuOpen = ref(false);
+const monthSelectorOpen = ref(false);
 
 // Default to current month
+const currentDate = new Date();
+const selectedYear = ref(currentDate.getFullYear());
+const selectedMonthNum = ref(currentDate.getMonth()); // 0-indexed
 const selectedMonth = ref(new Date().toISOString().slice(0, 7));
+
+// Month names for display
+const monthNames = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+// Available years (5 years back, 5 years forward)
+const availableYears = computed(() => {
+  const current = new Date().getFullYear();
+  const years = [];
+  for (let y = current - 5; y <= current + 5; y++) {
+    years.push(y);
+  }
+  return years;
+});
+
+// Formatted display of selected month
+const selectedMonthDisplay = computed(() => {
+  return `${monthNames[selectedMonthNum.value]} ${selectedYear.value}`;
+});
+
+// Toggle month selector
+function toggleMonthSelector() {
+  monthSelectorOpen.value = !monthSelectorOpen.value;
+}
+
+// Close month selector
+function closeMonthSelector() {
+  monthSelectorOpen.value = false;
+}
+
+// Select a month
+function selectMonth(monthIndex) {
+  selectedMonthNum.value = monthIndex;
+  updateSelectedMonth();
+}
+
+// Change year (does NOT trigger reload - user must click a month)
+function changeYear(delta) {
+  selectedYear.value += delta;
+}
+
+// Update the selectedMonth string (YYYY-MM format)
+function updateSelectedMonth() {
+  const month = String(selectedMonthNum.value + 1).padStart(2, "0");
+  selectedMonth.value = `${selectedYear.value}-${month}`;
+  emit("month-change", selectedMonth.value);
+  closeMonthSelector();
+}
 
 // Role-based checks
 const isSuperAdmin = computed(() => authStore.userRole === "super_admin");
@@ -146,29 +210,125 @@ function handleMonthChange(event) {
 
           <!-- Right side: month selector, connection status, and user menu -->
           <div class="flex items-center gap-4">
-            <!-- Month selector -->
-            <div
-              class="hidden sm:flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200"
-            >
-              <svg
-                class="w-4 h-4 text-gray-500"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+            <!-- Month selector (custom dropdown) -->
+            <div class="hidden sm:block relative">
+              <button
+                @click="toggleMonthSelector"
+                class="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-100 transition-colors"
               >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                />
-              </svg>
-              <input
-                type="month"
-                :value="selectedMonth"
-                @input="handleMonthChange"
-                class="bg-transparent text-sm font-medium text-gray-700 focus:outline-none cursor-pointer"
-              />
+                <svg
+                  class="w-4 h-4 text-gray-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                  />
+                </svg>
+                <span class="text-sm font-medium text-gray-700">{{
+                  selectedMonthDisplay
+                }}</span>
+                <svg
+                  class="w-4 h-4 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </button>
+
+              <!-- Month picker dropdown -->
+              <div
+                v-if="monthSelectorOpen"
+                class="absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-xl ring-1 ring-black ring-opacity-5 z-50 overflow-hidden"
+              >
+                <!-- Year selector -->
+                <div
+                  class="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600"
+                >
+                  <button
+                    @click="changeYear(-1)"
+                    class="p-1 rounded-full hover:bg-white hover:bg-opacity-20 transition-colors"
+                  >
+                    <svg
+                      class="w-5 h-5 text-white"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M15 19l-7-7 7-7"
+                      />
+                    </svg>
+                  </button>
+                  <span class="text-lg font-bold text-white">{{
+                    selectedYear
+                  }}</span>
+                  <button
+                    @click="changeYear(1)"
+                    class="p-1 rounded-full hover:bg-white hover:bg-opacity-20 transition-colors"
+                  >
+                    <svg
+                      class="w-5 h-5 text-white"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </button>
+                </div>
+
+                <!-- Month grid -->
+                <div class="p-3 grid grid-cols-3 gap-2">
+                  <button
+                    v-for="(month, index) in monthNames"
+                    :key="month"
+                    @click="selectMonth(index)"
+                    :class="[
+                      'px-3 py-2 text-sm font-medium rounded-lg transition-colors',
+                      selectedMonthNum === index &&
+                      selectedYear === new Date().getFullYear()
+                        ? 'bg-blue-500 text-white'
+                        : 'text-gray-700 hover:bg-blue-50 hover:text-blue-600',
+                    ]"
+                  >
+                    {{ month }}
+                  </button>
+                </div>
+
+                <!-- Quick actions -->
+                <div class="px-3 pb-3 pt-1 border-t border-gray-100">
+                  <button
+                    @click="
+                      selectedYear = new Date().getFullYear();
+                      selectedMonthNum = new Date().getMonth();
+                      updateSelectedMonth();
+                    "
+                    class="w-full px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                  >
+                    Go to Current Month
+                  </button>
+                </div>
+              </div>
             </div>
 
             <!-- Connection status -->
@@ -338,29 +498,70 @@ function handleMonthChange(event) {
           class="md:hidden border-t border-gray-200 bg-white relative z-50"
         >
           <nav class="px-4 py-3 space-y-1">
-            <!-- Month selector (mobile) -->
+            <!-- Month selector (mobile) - Year navigation -->
             <div
-              class="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg mb-3"
+              class="bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg p-3 mb-3"
             >
-              <svg
-                class="w-4 h-4 text-gray-500"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                />
-              </svg>
-              <input
-                type="month"
-                :value="selectedMonth"
-                @input="handleMonthChange"
-                class="flex-1 bg-transparent text-sm font-medium text-gray-700 focus:outline-none"
-              />
+              <div class="flex items-center justify-between mb-3">
+                <button
+                  @click="changeYear(-1)"
+                  class="p-1.5 rounded-full bg-white bg-opacity-20 hover:bg-opacity-30 transition-colors"
+                >
+                  <svg
+                    class="w-4 h-4 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M15 19l-7-7 7-7"
+                    />
+                  </svg>
+                </button>
+                <span class="text-lg font-bold text-white">{{
+                  selectedYear
+                }}</span>
+                <button
+                  @click="changeYear(1)"
+                  class="p-1.5 rounded-full bg-white bg-opacity-20 hover:bg-opacity-30 transition-colors"
+                >
+                  <svg
+                    class="w-4 h-4 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
+                </button>
+              </div>
+              <!-- Month grid (mobile) -->
+              <div class="grid grid-cols-4 gap-1.5">
+                <button
+                  v-for="(month, index) in monthNames"
+                  :key="month"
+                  @click="
+                    selectMonth(index);
+                    closeMobileMenu();
+                  "
+                  :class="[
+                    'px-2 py-1.5 text-xs font-medium rounded-md transition-colors',
+                    selectedMonthNum === index
+                      ? 'bg-white text-blue-600'
+                      : 'bg-white bg-opacity-20 text-white hover:bg-opacity-30',
+                  ]"
+                >
+                  {{ month }}
+                </button>
+              </div>
             </div>
 
             <!-- Navigation items -->
@@ -403,11 +604,12 @@ function handleMonthChange(event) {
 
     <!-- Click outside to close menus -->
     <div
-      v-if="userMenuOpen || mobileMenuOpen"
+      v-if="userMenuOpen || mobileMenuOpen || monthSelectorOpen"
       class="fixed inset-0 z-40"
       @click="
         closeUserMenu();
         closeMobileMenu();
+        closeMonthSelector();
       "
     ></div>
   </div>
