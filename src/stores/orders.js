@@ -8,6 +8,7 @@ import {
   orderBy,
   onSnapshot,
   addDoc,
+  deleteDoc,
   serverTimestamp,
   runTransaction,
 } from "firebase/firestore";
@@ -390,6 +391,56 @@ export const useOrdersStore = defineStore("orders", () => {
   }
 
   /**
+   * Permanently delete an order (Super Admin only).
+   * This is a hard delete - the order cannot be recovered.
+   * T-DATA-009: Only allowed for already soft-deleted orders.
+   */
+  async function permanentDeleteOrder(orderId) {
+    const authStore = useAuthStore();
+    error.value = null;
+
+    // Only Super Admin can permanently delete
+    if (authStore.userRole !== "super_admin") {
+      const err = {
+        code: "permission-denied",
+        message: "Only Super Admin can permanently delete orders.",
+      };
+      handleError(err);
+      throw err;
+    }
+
+    const order = orders.value[orderId];
+    if (!order) {
+      const err = { code: "not-found", message: "Order not found." };
+      handleError(err);
+      throw err;
+    }
+
+    // Must be soft-deleted first
+    if (!order.deletedAt) {
+      const err = {
+        code: "invalid-operation",
+        message: "Order must be soft-deleted before permanent deletion.",
+      };
+      handleError(err);
+      throw err;
+    }
+
+    try {
+      const orderRef = doc(db, "orders", orderId);
+      await deleteDoc(orderRef);
+
+      // Remove from local state
+      delete orders.value[orderId];
+
+      await addAuditLog("permanent_delete", orderId, { month: order.month });
+    } catch (err) {
+      handleError(err);
+      throw err;
+    }
+  }
+
+  /**
    * Stop the real-time listener and clear state.
    */
   function cleanup() {
@@ -422,6 +473,7 @@ export const useOrdersStore = defineStore("orders", () => {
     updateOrder,
     softDeleteOrder,
     recoverOrder,
+    permanentDeleteOrder,
     cleanup,
   };
 });

@@ -7,6 +7,7 @@ import { usePendingsStore } from "@/stores/pendings";
 import { useRouter } from "vue-router";
 import ModernDashboardLayout from "@/layouts/ModernDashboardLayout.vue";
 import SkeletonLoader from "@/components/SkeletonLoader.vue";
+import { SpreadsheetGrid } from "@/components/spreadsheet";
 
 const authStore = useAuthStore();
 const ordersStore = useOrdersStore();
@@ -193,6 +194,19 @@ function isTooltipVisible(orderId, fieldKey) {
   return activeTooltip.value === `${orderId}_${fieldKey}`;
 }
 
+// Event handlers for SpreadsheetGrid
+function handleOrderUpdated(payload) {
+  console.log("[Dashboard] Order updated:", payload);
+}
+
+function handleOrderCreated(payload) {
+  console.log("[Dashboard] Order created:", payload);
+}
+
+function handleOrderDeleted(payload) {
+  console.log("[Dashboard] Order deleted:", payload);
+}
+
 onMounted(() => {
   console.log(
     "[Dashboard] Mounting, fetching orders for:",
@@ -344,173 +358,13 @@ async function handleLogout() {
       {{ ordersStore.error }}
     </div>
 
-    <!-- Orders List -->
-    <div class="bg-white rounded-lg shadow">
-      <div class="px-6 py-4 border-b border-gray-200">
-        <h3 class="text-lg font-semibold text-gray-900">
-          Orders — {{ selectedMonth }}
-        </h3>
-      </div>
-
-      <div class="p-6">
-        <!-- Loading state with skeleton -->
-        <div v-if="ordersStore.loading || columnsStore.loading">
-          <SkeletonLoader type="table" :lines="5" />
-        </div>
-
-        <!-- No orders -->
-        <div
-          v-else-if="ordersStore.activeOrders.length === 0"
-          class="text-gray-500 text-center py-8"
-        >
-          <svg
-            class="w-12 h-12 mx-auto text-gray-300 mb-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-            />
-          </svg>
-          <p>No orders for {{ selectedMonth }}.</p>
-          <p class="text-sm mt-1">Try selecting a different month.</p>
-        </div>
-
-        <!-- No columns visible for this role -->
-        <div
-          v-else-if="visibleColumns.length === 0"
-          class="text-gray-500 text-center py-8"
-        >
-          <svg
-            class="w-12 h-12 mx-auto text-gray-300 mb-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-            />
-          </svg>
-          <p>
-            No columns are visible for your role ({{ authStore.userRole }}).
-          </p>
-          <p class="text-sm mt-1">
-            Contact your administrator to configure column permissions.
-          </p>
-        </div>
-
-        <!-- Dynamic table based on column_definitions and role_permissions -->
-        <div v-else class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead>
-              <tr class="border-b text-left text-gray-500">
-                <!-- ID column -->
-                <th class="pb-3 pr-4 whitespace-nowrap font-medium">ID</th>
-                <!-- Dynamic columns based on role permissions -->
-                <th
-                  v-for="col in visibleColumns"
-                  :key="col.key"
-                  class="pb-3 pr-4 whitespace-nowrap font-medium"
-                >
-                  {{ col.label }}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="order in ordersStore.activeOrders"
-                :key="order.id"
-                class="border-b last:border-0 hover:bg-gray-50 transition-colors"
-              >
-                <!-- ID column -->
-                <td class="py-3 pr-4 font-mono text-xs text-gray-500">
-                  {{ order.id.slice(0, 8) }}…
-                </td>
-                <!-- Dynamic columns -->
-                <td
-                  v-for="col in visibleColumns"
-                  :key="col.key"
-                  class="py-3 pr-4"
-                >
-                  <div class="flex items-center gap-1">
-                    <span>{{
-                      formatValue(getOrderFieldValue(order, col.key), col.type)
-                    }}</span>
-
-                    <!-- Pending change indicator -->
-                    <div
-                      v-if="hasPendingChange(order.id, col.key)"
-                      class="relative inline-block"
-                      @mouseenter="showTooltip(order.id, col.key)"
-                      @mouseleave="hideTooltip()"
-                    >
-                      <!-- Warning icon -->
-                      <svg
-                        class="w-4 h-4 text-amber-500 cursor-help"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path
-                          fill-rule="evenodd"
-                          d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                          clip-rule="evenodd"
-                        />
-                      </svg>
-
-                      <!-- Tooltip -->
-                      <div
-                        v-if="isTooltipVisible(order.id, col.key)"
-                        class="fixed z-[9999] w-72 bg-gray-900 text-white text-xs rounded-lg shadow-xl p-4"
-                        :style="{
-                          top: '50%',
-                          left: '50%',
-                          transform: 'translate(-50%, -50%)',
-                        }"
-                      >
-                        <div class="font-semibold text-amber-400 mb-3 text-sm">
-                          ⏳ Pending Change Request
-                        </div>
-                        <div class="space-y-2">
-                          <div class="flex justify-between">
-                            <span class="text-gray-400">Requested by:</span>
-                            <span class="text-white font-medium">{{
-                              getPendingForField(order.id, col.key)
-                                ?.requestedByName || "—"
-                            }}</span>
-                          </div>
-                          <div class="flex justify-between">
-                            <span class="text-gray-400">Requested at:</span>
-                            <span class="text-white">{{
-                              formatDateTime(
-                                getPendingForField(order.id, col.key)
-                                  ?.requestedAt,
-                              )
-                            }}</span>
-                          </div>
-                          <div class="flex justify-between">
-                            <span class="text-gray-400">New value:</span>
-                            <span class="text-green-400 font-bold">{{
-                              getPendingForField(order.id, col.key)?.newValue ??
-                              "—"
-                            }}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+    <!-- Spreadsheet Grid Component -->
+    <SpreadsheetGrid
+      :month="selectedMonth"
+      :show-deleted="false"
+      @order-updated="handleOrderUpdated"
+      @order-created="handleOrderCreated"
+      @order-deleted="handleOrderDeleted"
+    />
   </ModernDashboardLayout>
 </template>
