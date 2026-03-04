@@ -259,12 +259,17 @@ export const useOrdersStore = defineStore("orders", () => {
         if (!snap.exists())
           throw { code: "not-found", message: "Order not found." };
 
-        const serverVersion = snap.data().version;
+        const serverData = snap.data();
+        const serverVersion = serverData.version;
         if (serverVersion !== version) {
+          // Get the server's current value for this field
+          const serverValue =
+            serverData.dynamic_fields?.[field] ?? serverData[field] ?? null;
           throw {
             code: "version_conflict",
             message: `Version conflict: expected ${version}, got ${serverVersion}.`,
             serverVersion,
+            serverValue,
           };
         }
 
