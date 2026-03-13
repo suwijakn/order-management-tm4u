@@ -1,11 +1,10 @@
 <script setup>
-import { onMounted, onUnmounted, computed, ref, watch } from "vue";
+import { onMounted, onUnmounted, computed, ref, watch, inject } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import { useOrdersStore } from "@/stores/orders";
 import { useColumnsStore } from "@/stores/columns";
 import { usePendingsStore } from "@/stores/pendings";
 import { useRouter } from "vue-router";
-import ModernDashboardLayout from "@/layouts/ModernDashboardLayout.vue";
 import SkeletonLoader from "@/components/SkeletonLoader.vue";
 import { SpreadsheetGrid } from "@/components/spreadsheet";
 
@@ -15,13 +14,10 @@ const columnsStore = useColumnsStore();
 const pendingsStore = usePendingsStore();
 const router = useRouter();
 
-// Default to current month in YYYY-MM format, but allow user to change
-const selectedMonth = ref(new Date().toISOString().slice(0, 7));
-
-// Handle month change from layout
-function handleMonthChange(newMonth) {
-  selectedMonth.value = newMonth;
-}
+const selectedMonth = inject(
+  "selectedMonth",
+  ref(new Date().toISOString().slice(0, 7)),
+);
 
 // Check if user has allowed role for dashboard access
 const allowedRoles = ["super_admin", "manager", "jr_sales", "sr_sales"];
@@ -236,9 +232,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  ordersStore.cleanup();
-  columnsStore.cleanup();
-  pendingsStore.cleanup();
+  // Store cleanup is handled at the layout level, not per-view
 });
 
 const totalOrders = computed(() => ordersStore.activeOrders.length);
@@ -257,60 +251,7 @@ async function handleLogout() {
 </script>
 
 <template>
-  <!-- Access Denied Message -->
-  <div
-    v-if="!isAuthorized && authStore.isAuthenticated"
-    class="min-h-screen bg-gray-50 flex items-center justify-center"
-  >
-    <div class="max-w-md w-full mx-4">
-      <div class="bg-white rounded-lg shadow-lg p-8 text-center">
-        <div
-          class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4"
-        >
-          <svg
-            class="w-8 h-8 text-red-600"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-1.964-1.333-2.732 0L3.082 16c-.77 1.333.192 3 1.732 3z"
-            />
-          </svg>
-        </div>
-        <h2 class="text-2xl font-bold text-gray-900 mb-2">Access Denied</h2>
-        <p class="text-gray-600 mb-4">
-          You don't have permission to access this page. Only users with the
-          following roles can view the dashboard:
-        </p>
-        <div class="bg-gray-50 rounded-lg p-4 mb-6">
-          <ul class="text-sm text-gray-700 space-y-1">
-            <li>• Super Admin</li>
-            <li>• Manager</li>
-            <li>• Senior Sales</li>
-            <li>• Junior Sales</li>
-          </ul>
-        </div>
-        <button
-          @click="handleLogout"
-          class="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-        >
-          Logout
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Dashboard Content with Layout (only shown if authorized) -->
-  <ModernDashboardLayout
-    v-else-if="isAuthorized"
-    @month-change="handleMonthChange"
-  >
-    <template #title>Spreadsheet</template>
-
+  <div>
     <!-- Welcome section -->
     <div class="mb-6">
       <h2 class="text-2xl font-bold text-gray-900">Dashboard</h2>
@@ -366,5 +307,5 @@ async function handleLogout() {
       @order-created="handleOrderCreated"
       @order-deleted="handleOrderDeleted"
     />
-  </ModernDashboardLayout>
+  </div>
 </template>

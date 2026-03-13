@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, provide } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { usePendingsStore } from "@/stores/pendings";
@@ -167,7 +167,9 @@ function closeUserMenu() {
   userMenuOpen.value = false;
 }
 
-// Emit month change to parent
+// Provide selectedMonth to child route components via inject
+provide("selectedMonth", selectedMonth);
+
 const emit = defineEmits(["month-change"]);
 
 function handleMonthChange(event) {
@@ -599,7 +601,7 @@ function handleMonthChange(event) {
 
     <!-- Main content -->
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      <slot :selected-month="selectedMonth"></slot>
+      <router-view />
     </main>
 
     <!-- Click outside to close menus -->

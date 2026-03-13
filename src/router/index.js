@@ -8,13 +8,11 @@ import RegisterView from "@/views/RegisterView.vue";
 import DashboardView from "@/views/DashboardView.vue";
 import EmailVerificationView from "@/views/EmailVerificationView.vue";
 import PendingReviewView from "@/views/PendingReviewView.vue";
+import DeletedOrdersView from "@/views/DeletedOrdersView.vue";
 import TestOrderCreate from "@/views/TestOrderCreate.vue";
+import ModernDashboardLayout from "@/layouts/ModernDashboardLayout.vue";
 
 const routes = [
-  {
-    path: "/",
-    redirect: "/dashboard",
-  },
   {
     path: "/login",
     name: "Login",
@@ -40,22 +38,33 @@ const routes = [
     meta: { requiresAuth: true, requiresEmailVerification: false },
   },
   {
-    path: "/dashboard",
-    name: "Dashboard",
-    component: DashboardView,
-    meta: { requiresAuth: true, requiresEmailVerification: true },
-  },
-  {
     path: "/test-order-create",
     name: "TestOrderCreate",
     component: TestOrderCreate,
     meta: { requiresAuth: true, requiresEmailVerification: true },
   },
   {
-    path: "/pending-approvals",
-    name: "PendingApprovals",
-    component: PendingReviewView,
+    path: "/",
+    component: ModernDashboardLayout,
+    redirect: "/dashboard",
     meta: { requiresAuth: true, requiresEmailVerification: true },
+    children: [
+      {
+        path: "dashboard",
+        name: "Dashboard",
+        component: DashboardView,
+      },
+      {
+        path: "pending-approvals",
+        name: "PendingApprovals",
+        component: PendingReviewView,
+      },
+      {
+        path: "deleted-orders",
+        name: "DeletedOrders",
+        component: DeletedOrdersView,
+      },
+    ],
   },
 ];
 

@@ -9,6 +9,7 @@ import {
   onSnapshot,
   addDoc,
   updateDoc,
+  deleteDoc,
   serverTimestamp,
   Timestamp,
   getDocs,
@@ -17,6 +18,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/services/firebase";
 import { useAuthStore } from "@/stores/auth";
+import { useOrdersStore } from "@/stores/orders";
 
 // 7-day expiry for pending changes (T-DATA-003)
 const PENDING_EXPIRY_DAYS = 7;
@@ -121,16 +123,18 @@ export const usePendingsStore = defineStore("pendings", () => {
       filterByUser ||
       !["manager", "super_admin"].includes(authStore.userRole)
     ) {
-      // Non-managers only see their own
+      // Non-managers only see their own pending changes
       q = query(
         collection(db, "pending_changes"),
         where("requestedBy", "==", authStore.user.uid),
+        where("status", "==", "pending"),
         orderBy("requestedAt", "desc"),
       );
     } else {
       // Managers and Super Admins see all pending changes
       q = query(
         collection(db, "pending_changes"),
+        where("status", "==", "pending"),
         orderBy("requestedAt", "desc"),
       );
     }
@@ -328,11 +332,11 @@ export const usePendingsStore = defineStore("pendings", () => {
 
   /**
    * Approve a pending change. Manager+ only.
-   * The actual field update on the order/cost is handled by a Cloud Function
-   * that runs the approval transaction atomically (verifies baseVersion, etc.)
+   * Applies the new value to the order/cost and marks the pending as approved.
    */
   async function approvePending(pendingId) {
     const authStore = useAuthStore();
+    const ordersStore = useOrdersStore();
     error.value = null;
 
     if (!["manager", "super_admin"].includes(authStore.userRole)) {
@@ -341,26 +345,67 @@ export const usePendingsStore = defineStore("pendings", () => {
       throw new Error(error.value);
     }
 
-    // Optimistic update
-    const idx = pendings.value.findIndex((p) => p.id === pendingId);
-    const previous = idx >= 0 ? { ...pendings.value[idx] } : null;
-    if (idx >= 0) {
-      pendings.value[idx] = {
-        ...pendings.value[idx],
-        status: "approved",
-        reviewedBy: authStore.user.uid,
-        statusUpdatedAt: new Date(),
-      };
+    // Find the pending change from local state
+    const pending =
+      pendings.value.find((p) => p.id === pendingId) ||
+      allPendings.value.find((p) => p.id === pendingId);
+
+    if (!pending) {
+      error.value = "Pending change not found.";
+      throw new Error(error.value);
     }
 
+    // Save pending data before any modifications (for rollback and order update)
+    const pendingSnapshot = { ...pending };
+
     try {
+      // Step 1: Apply the new value to the order
+      if (
+        pendingSnapshot.targetCollection === "orders" &&
+        pendingSnapshot.targetId
+      ) {
+        const field = pendingSnapshot.field.replace("dynamic_fields.", "");
+        const order = ordersStore.orders[pendingSnapshot.targetId];
+        const currentVersion =
+          order?.version || pendingSnapshot.baseVersion || 1;
+
+        console.log("[pendings] Applying approved value:", {
+          orderId: pendingSnapshot.targetId,
+          field,
+          newValue: pendingSnapshot.newValue,
+          currentVersion,
+        });
+
+        await updateDoc(doc(db, "orders", pendingSnapshot.targetId), {
+          [`dynamic_fields.${field}`]: pendingSnapshot.newValue,
+          version: currentVersion + 1,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      // Step 2: Mark the pending as approved
       await updateDoc(doc(db, "pending_changes", pendingId), {
         status: "approved",
         reviewedBy: authStore.user.uid,
+        reviewedByName: authStore.user.displayName || authStore.userEmail,
         statusUpdatedAt: serverTimestamp(),
       });
+
+      console.log("[pendings] Pending approved and value applied:", pendingId);
+
+      // Step 3: Delete the resolved pending doc so the field can accept new pendings
+      // The onSnapshot listener (filtered by status=="pending") will automatically
+      // remove it from the UI when status changes in step 2.
+      try {
+        await deleteDoc(doc(db, "pending_changes", pendingId));
+        console.log("[pendings] Cleaned up approved pending doc:", pendingId);
+      } catch (cleanupErr) {
+        console.warn(
+          "[pendings] Cleanup of approved pending failed:",
+          cleanupErr.message,
+        );
+      }
     } catch (err) {
-      if (idx >= 0 && previous) pendings.value[idx] = previous;
       handleError(err);
       throw err;
     }
@@ -383,23 +428,12 @@ export const usePendingsStore = defineStore("pendings", () => {
       throw new Error(error.value);
     }
 
-    const idx = pendings.value.findIndex((p) => p.id === pendingId);
-    const previous = idx >= 0 ? { ...pendings.value[idx] } : null;
-    const currentRejectionCount = pendings.value[idx]?.rejectionCount ?? 0;
-
-    if (idx >= 0) {
-      pendings.value[idx] = {
-        ...pendings.value[idx],
-        status: "rejected",
-        reviewedBy: authStore.user.uid,
-        reviewedByName: authStore.user.displayName || authStore.userEmail,
-        rejectionComment: comment,
-        statusUpdatedAt: new Date(),
-        rejectionCount: currentRejectionCount + 1,
-      };
-    }
+    // Get rejection count before any changes
+    const pendingItem = pendings.value.find((p) => p.id === pendingId);
+    const currentRejectionCount = pendingItem?.rejectionCount ?? 0;
 
     try {
+      // Step 1: Mark the pending as rejected
       await updateDoc(doc(db, "pending_changes", pendingId), {
         status: "rejected",
         reviewedBy: authStore.user.uid,
@@ -408,8 +442,22 @@ export const usePendingsStore = defineStore("pendings", () => {
         statusUpdatedAt: serverTimestamp(),
         rejectionCount: currentRejectionCount + 1,
       });
+
+      console.log("[pendings] Pending rejected:", pendingId);
+
+      // Step 2: Delete the rejected pending doc so the field can accept new pendings
+      // The onSnapshot listener (filtered by status=="pending") will automatically
+      // remove it from the UI when status changes in step 1.
+      try {
+        await deleteDoc(doc(db, "pending_changes", pendingId));
+        console.log("[pendings] Cleaned up rejected pending doc:", pendingId);
+      } catch (cleanupErr) {
+        console.warn(
+          "[pendings] Cleanup of rejected pending failed:",
+          cleanupErr.message,
+        );
+      }
     } catch (err) {
-      if (idx >= 0 && previous) pendings.value[idx] = previous;
       handleError(err);
       throw err;
     }

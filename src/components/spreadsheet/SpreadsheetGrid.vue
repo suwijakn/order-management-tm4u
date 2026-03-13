@@ -4,6 +4,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useOrdersStore } from "@/stores/orders";
 import { useColumnsStore } from "@/stores/columns";
 import { usePendingsStore } from "@/stores/pendings";
+import { useCostsStore } from "@/stores/costs";
 import { usePagination } from "@/composables/useVirtualScroll";
 import SpreadsheetCell from "./SpreadsheetCell.vue";
 import CostRow from "./CostRow.vue";
@@ -30,6 +31,7 @@ const authStore = useAuthStore();
 const ordersStore = useOrdersStore();
 const columnsStore = useColumnsStore();
 const pendingsStore = usePendingsStore();
+const costsStore = useCostsStore();
 
 // Local state
 const highlightedCells = ref(new Set()); // Track cells that were recently changed
@@ -85,11 +87,10 @@ const {
   endIndex: pageEndIndex,
 } = usePagination({ items: orders, pageSize: 50 });
 
-// Cost data for the current month (Manager+ only)
-const costData = computed(() => {
-  if (!isManagerOrAbove.value) return null;
-  // TODO: Implement costs store and fetch cost data
-  return null;
+// Cost data for the current month (Manager+ only) - all cost entries
+const costItems = computed(() => {
+  if (!isManagerOrAbove.value) return [];
+  return costsStore.activeCosts;
 });
 
 // Get all pending changes for display
@@ -238,6 +239,21 @@ function highlightCell(orderId, field) {
 function isCellHighlighted(orderId, field) {
   return highlightedCells.value.has(`${orderId}_${field}`);
 }
+
+// Watch for month changes to fetch costs (Manager+ only)
+watch(
+  () => props.month,
+  (newMonth) => {
+    if (isManagerOrAbove.value && newMonth) {
+      try {
+        costsStore.fetchCosts(newMonth);
+      } catch (err) {
+        console.log("[SpreadsheetGrid] Costs fetch skipped:", err.message);
+      }
+    }
+  },
+  { immediate: true },
+);
 
 // Handle add row
 async function handleAddRow() {
@@ -489,14 +505,19 @@ const isLoading = computed(() => ordersStore.loading || columnsStore.loading);
               </td>
             </tr>
 
-            <!-- Cost row (Manager+ only) -->
+            <!-- Cost rows (Manager+ only) -->
             <CostRow
-              v-if="!showDeleted && costData"
-              :cost-data="costData"
+              v-for="cost in costItems"
+              v-if="!showDeleted && costItems.length > 0"
+              :key="'cost-' + cost.id"
+              :cost-data="cost"
               :columns="visibleColumns"
               :order-month="month"
               :pending-changes="
-                allPendingChanges.filter((p) => p.targetCollection === 'costs')
+                allPendingChanges.filter(
+                  (p) =>
+                    p.targetCollection === 'costs' && p.targetId === cost.id,
+                )
               "
               @save="handleCellSave"
               @pending-created="handlePendingCreated"

@@ -139,17 +139,14 @@ const displayValue = computed(() => {
   return String(props.value);
 });
 
-// Format date helper
+// Format date helper - date only, no time
 function formatDate(date) {
   if (!(date instanceof Date) || isNaN(date)) return "—";
-  const dateStr = date.toLocaleDateString();
-  const timeStr = date.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
+  return date.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
   });
-  return `${dateStr} ${timeStr}`;
 }
 
 // Format date/time for tooltip

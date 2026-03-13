@@ -301,6 +301,7 @@ service cloud.firestore {
       // Update: Status transitions only
       // - Requester can withdraw their own pending (pending → withdrawn)
       // - Manager+ can approve or reject any pending
+      // - Any user can overwrite a resolved doc with a new pending request
       // T-LOGIC-003: Cooldown after rejection enforced via Cloud Function
       allow update: if isAuthenticated()
                     && (
@@ -324,20 +325,31 @@ service cloud.firestore {
                           incomingData().status != 'rejected'
                           || incomingData().rejectionCount == existingData().rejectionCount + 1
                         )
+                        // Immutable fields: cannot change the original request data
+                        && incomingData().targetCollection == existingData().targetCollection
+                        && incomingData().targetId == existingData().targetId
+                        && incomingData().field == existingData().field
+                        && incomingData().baseValue == existingData().baseValue
+                        && incomingData().baseVersion == existingData().baseVersion
+                        && incomingData().newValue == existingData().newValue
+                        && incomingData().requestedBy == existingData().requestedBy
+                        && incomingData().requestedAt == existingData().requestedAt
                       )
-                    )
-                    // Immutable fields: cannot change the original request data
-                    && incomingData().targetCollection == existingData().targetCollection
-                    && incomingData().targetId == existingData().targetId
-                    && incomingData().field == existingData().field
-                    && incomingData().baseValue == existingData().baseValue
-                    && incomingData().baseVersion == existingData().baseVersion
-                    && incomingData().newValue == existingData().newValue
-                    && incomingData().requestedBy == existingData().requestedBy
-                    && incomingData().requestedAt == existingData().requestedAt;
+                      ||
+                      // Case 3: Any user can overwrite a resolved (non-pending) doc
+                      // with a new pending request. This handles the case where the
+                      // deleteDoc cleanup after approval/rejection did not complete.
+                      (
+                        existingData().status in ['approved', 'rejected', 'withdrawn']
+                        && incomingData().status == 'pending'
+                        && incomingData().requestedBy == userId()
+                      )
+                    );
 
-      // Pending changes cannot be deleted, only status-transitioned
-      allow delete: if false;
+      // Manager+ can delete resolved pendings (approved/rejected/withdrawn)
+      // This allows cleanup after approval so the same field can have new pendings
+      allow delete: if isManagerOrAbove()
+                    && existingData().status in ['approved', 'rejected', 'withdrawn'];
     }
 
 
