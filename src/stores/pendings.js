@@ -19,6 +19,7 @@ import {
 import { db } from "@/services/firebase";
 import { useAuthStore } from "@/stores/auth";
 import { useOrdersStore } from "@/stores/orders";
+import { logPendingAction, AuditAction } from "@/services/auditLog";
 
 // 7-day expiry for pending changes (T-DATA-003)
 const PENDING_EXPIRY_DAYS = 7;
@@ -315,6 +316,16 @@ export const usePendingsStore = defineStore("pendings", () => {
       try {
         await setDoc(docRef, pendingData);
         console.log("[pendings] Successfully created pending:", docRef.id);
+
+        // Audit log
+        await logPendingAction(AuditAction.PENDING_CREATE, docRef.id, {
+          targetCollection,
+          targetId,
+          field,
+          baseValue,
+          newValue,
+        });
+
         return docRef.id;
       } catch (setDocErr) {
         console.error(
@@ -393,6 +404,15 @@ export const usePendingsStore = defineStore("pendings", () => {
 
       console.log("[pendings] Pending approved and value applied:", pendingId);
 
+      // Audit log
+      await logPendingAction(AuditAction.PENDING_APPROVE, pendingId, {
+        targetCollection: pendingSnapshot.targetCollection,
+        targetId: pendingSnapshot.targetId,
+        field: pendingSnapshot.field,
+        newValue: pendingSnapshot.newValue,
+        requestedBy: pendingSnapshot.requestedBy,
+      });
+
       // Step 3: Delete the resolved pending doc so the field can accept new pendings
       // The onSnapshot listener (filtered by status=="pending") will automatically
       // remove it from the UI when status changes in step 2.
@@ -444,6 +464,12 @@ export const usePendingsStore = defineStore("pendings", () => {
       });
 
       console.log("[pendings] Pending rejected:", pendingId);
+
+      // Audit log
+      await logPendingAction(AuditAction.PENDING_REJECT, pendingId, {
+        rejectionComment: comment,
+        rejectionCount: currentRejectionCount + 1,
+      });
 
       // Step 2: Delete the rejected pending doc so the field can accept new pendings
       // The onSnapshot listener (filtered by status=="pending") will automatically
@@ -498,6 +524,13 @@ export const usePendingsStore = defineStore("pendings", () => {
       await updateDoc(doc(db, "pending_changes", pendingId), {
         status: "withdrawn",
         statusUpdatedAt: serverTimestamp(),
+      });
+
+      // Audit log
+      await logPendingAction(AuditAction.PENDING_WITHDRAW, pendingId, {
+        targetCollection: pending.targetCollection,
+        targetId: pending.targetId,
+        field: pending.field,
       });
     } catch (err) {
       pendings.value[idx] = previous;

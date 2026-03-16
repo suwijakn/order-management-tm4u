@@ -13,6 +13,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/services/firebase";
 import { useAuthStore } from "@/stores/auth";
+import { logCostAction, AuditAction } from "@/services/auditLog";
 
 export const useCostsStore = defineStore("costs", () => {
   // ---------------------------------------------------------------------------
@@ -56,32 +57,6 @@ export const useCostsStore = defineStore("costs", () => {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
-  async function addAuditLog(action, targetId, details = {}) {
-    const authStore = useAuthStore();
-    console.log("[costs] Creating audit log:", {
-      action,
-      targetId,
-      details,
-      userId: authStore.user?.uid,
-      userName: authStore.user?.displayName || authStore.userEmail,
-    });
-
-    try {
-      const auditRef = await addDoc(collection(db, "audit_logs"), {
-        userId: authStore.user.uid,
-        userName: authStore.user.displayName || authStore.userEmail || "",
-        action,
-        targetCollection: "costs",
-        targetId,
-        details,
-        timestamp: serverTimestamp(),
-      });
-      console.log("[costs] Audit log created with ID:", auditRef.id);
-    } catch (err) {
-      console.error("[costs] audit log failed:", err);
-      throw err; // Re-throw so we can see the error
-    }
-  }
 
   function isAuthorized() {
     const authStore = useAuthStore();
@@ -219,18 +194,10 @@ export const useCostsStore = defineStore("costs", () => {
       console.log("[costs] Cost document written to Firestore");
 
       // Add audit log
-      console.log("[costs] Adding audit log for cost creation...");
-      try {
-        await addAuditLog("create", docRef.id, {
-          month: costData.month,
-          status: costData.status,
-          dynamicFields: costData.dynamic_fields,
-        });
-        console.log("[costs] Audit log added successfully");
-      } catch (auditErr) {
-        console.error("[costs] Failed to add audit log:", auditErr);
-        // Don't throw - audit log failure shouldn't break the main operation
-      }
+      await logCostAction(AuditAction.COST_CREATE, docRef.id, {
+        month: costData.month,
+        status: costData.status,
+      });
 
       return docRef.id;
     } catch (err) {

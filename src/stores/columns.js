@@ -16,6 +16,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/services/firebase";
 import { useAuthStore } from "@/stores/auth";
+import { logColumnAction, AuditAction } from "@/services/auditLog";
 
 export const useColumnsStore = defineStore("columns", () => {
   // ---------------------------------------------------------------------------
@@ -204,6 +205,12 @@ export const useColumnsStore = defineStore("columns", () => {
         ...changes,
         updatedAt: serverTimestamp(),
       });
+
+      // Audit log
+      await logColumnAction(AuditAction.COLUMN_UPDATE, key, {
+        changes,
+        previousValues: previous,
+      });
     } catch (err) {
       // Revert
       definitions.value[idx] = previous;
@@ -338,6 +345,14 @@ export const useColumnsStore = defineStore("columns", () => {
 
       await Promise.all(roleUpdates);
 
+      // Audit log
+      await logColumnAction(AuditAction.COLUMN_CREATE, key, {
+        label,
+        type,
+        isDataRelated,
+        rolePermissions,
+      });
+
       return key;
     } catch (err) {
       handleError(err);
@@ -438,6 +453,11 @@ export const useColumnsStore = defineStore("columns", () => {
         throw new Error(error.value);
       }
 
+      // Audit log
+      await logColumnAction(AuditAction.COLUMN_CLEAR_DATA, columnKey, {
+        clearedCount: updates.length,
+      });
+
       return updates.length;
     } catch (err) {
       handleError(err);
@@ -492,6 +512,12 @@ export const useColumnsStore = defineStore("columns", () => {
       );
 
       await Promise.allSettled(rolePermissionUpdates);
+
+      // Audit log
+      await logColumnAction(AuditAction.COLUMN_DELETE, key, {
+        label: column.label,
+        type: column.type,
+      });
     } catch (err) {
       handleError(err);
       throw err;
@@ -534,6 +560,11 @@ export const useColumnsStore = defineStore("columns", () => {
         } else {
           error.value = `${failures.length} column(s) failed to update order.`;
         }
+      } else {
+        // Audit log only on full success
+        await logColumnAction(AuditAction.COLUMN_REORDER, "all", {
+          newOrder: orderedKeys,
+        });
       }
     } catch (err) {
       handleError(err);

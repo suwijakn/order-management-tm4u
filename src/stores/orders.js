@@ -14,6 +14,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/services/firebase";
 import { useAuthStore } from "@/stores/auth";
+import { logOrderAction, AuditAction } from "@/services/auditLog";
 
 export const useOrdersStore = defineStore("orders", () => {
   // ---------------------------------------------------------------------------
@@ -56,23 +57,6 @@ export const useOrdersStore = defineStore("orders", () => {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
-
-  async function addAuditLog(action, targetId, details = {}) {
-    const authStore = useAuthStore();
-    try {
-      await addDoc(collection(db, "audit_logs"), {
-        userId: authStore.user.uid,
-        userName: authStore.user.displayName || authStore.userEmail || "",
-        action,
-        targetCollection: "orders",
-        targetId,
-        details,
-        timestamp: serverTimestamp(),
-      });
-    } catch (err) {
-      console.warn("[orders] audit log failed:", err);
-    }
-  }
 
   function convertTimestamps(data) {
     const result = { ...data };
@@ -222,7 +206,9 @@ export const useOrdersStore = defineStore("orders", () => {
         deletedAt: null,
         deletedBy: null,
       });
-      await addAuditLog("create", docRef.id, { month: currentMonth.value });
+      await logOrderAction(AuditAction.ORDER_CREATE, docRef.id, {
+        month: currentMonth.value,
+      });
       return docRef.id;
     } catch (err) {
       handleError(err);
@@ -286,7 +272,7 @@ export const useOrdersStore = defineStore("orders", () => {
           updatedAt: serverTimestamp(),
         });
       });
-      await addAuditLog("update", orderId, {
+      await logOrderAction(AuditAction.ORDER_UPDATE, orderId, {
         field,
         newValue: value,
         version: version + 1,
@@ -351,7 +337,9 @@ export const useOrdersStore = defineStore("orders", () => {
         deletedBy: authStore.user.uid,
       };
 
-      await addAuditLog("delete", orderId, { month: order.month });
+      await logOrderAction(AuditAction.ORDER_DELETE, orderId, {
+        month: order.month,
+      });
     } catch (err) {
       handleError(err);
       throw err;
@@ -387,7 +375,9 @@ export const useOrdersStore = defineStore("orders", () => {
           updatedAt: serverTimestamp(),
         });
       });
-      await addAuditLog("recover", orderId, { month: order.month });
+      await logOrderAction(AuditAction.ORDER_RECOVER, orderId, {
+        month: order.month,
+      });
     } catch (err) {
       orders.value[orderId] = previous;
       handleError(err);
@@ -438,7 +428,9 @@ export const useOrdersStore = defineStore("orders", () => {
       // Remove from local state
       delete orders.value[orderId];
 
-      await addAuditLog("permanent_delete", orderId, { month: order.month });
+      await logOrderAction(AuditAction.ORDER_PERMANENT_DELETE, orderId, {
+        month: order.month,
+      });
     } catch (err) {
       handleError(err);
       throw err;
