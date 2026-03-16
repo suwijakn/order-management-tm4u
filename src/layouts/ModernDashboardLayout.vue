@@ -112,12 +112,6 @@ const navigationItems = computed(() => [
     icon: "⚙️",
   },
   {
-    name: "Permissions",
-    route: "/manage-permissions",
-    visible: isSuperAdmin.value,
-    icon: "🔒",
-  },
-  {
     name: "Deleted",
     route: "/deleted-orders",
     visible: isManagerOrAbove.value,
