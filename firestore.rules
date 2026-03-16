@@ -472,14 +472,17 @@ service cloud.firestore {
                     ])
                     // Must log the actual authenticated user
                     && incomingData().userId == userId()
-                    // Action must be a known type
+                    // Action must be a known type (from AuditAction enum)
                     && incomingData().action in [
-                      'create', 'update', 'delete', 'approve', 'reject',
-                      'withdraw', 'recover', 'permanent_delete'
+                      'order_create', 'order_update', 'order_delete', 'order_recover', 'order_permanent_delete',
+                      'cost_create', 'cost_update', 'cost_delete',
+                      'pending_create', 'pending_approve', 'pending_reject', 'pending_withdraw', 'pending_auto_expire',
+                      'column_create', 'column_update', 'column_delete', 'column_reorder', 'column_clear_data',
+                      'login_success', 'login_failed', 'logout'
                     ]
                     // Target collection must be valid
                     && incomingData().targetCollection in [
-                      'orders', 'costs', 'pending_changes',
+                      'orders', 'costs', 'pending_changes', 'auth',
                       'users', 'column_definitions', 'role_permissions'
                     ]
                     // Timestamp must be server time (prevents backdating)
