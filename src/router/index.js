@@ -101,9 +101,6 @@ router.beforeEach(async (to, from, next) => {
   } else if (to.meta.requiresEmailVerification && !authStore.emailVerified) {
     next({ name: "EmailVerification" });
   } else if (to.meta.requiresJrSalesAbove && authStore.isAuthenticated) {
-    // Check if user has jr_sales role or above
-    // For now, allow all authenticated users (role check will be done in components)
-    // TODO: Implement proper role checking once custom claims are loaded
     next();
   } else {
     next();

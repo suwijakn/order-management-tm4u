@@ -1,5 +1,4 @@
 // Firebase configuration and initialization
-// TODO: Replace with actual Firebase config from firebase-config.json
 
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
