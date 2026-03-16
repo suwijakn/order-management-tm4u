@@ -113,20 +113,7 @@ export const useOrdersStore = defineStore("orders", () => {
     unsubscribeListener = onSnapshot(
       q,
       (snapshot) => {
-        console.log("[orders] Snapshot received:", {
-          month: month,
-          size: snapshot.size,
-          docChanges: snapshot.docChanges().length,
-        });
-
         snapshot.docChanges().forEach((change) => {
-          console.log("[orders] Doc change:", {
-            type: change.type,
-            id: change.doc.id,
-            month: change.doc.data()?.month,
-            deletedAt: change.doc.data()?.deletedAt,
-          });
-
           if (change.type === "added" || change.type === "modified") {
             orders.value[change.doc.id] = {
               id: change.doc.id,
@@ -136,13 +123,6 @@ export const useOrdersStore = defineStore("orders", () => {
             delete orders.value[change.doc.id];
           }
         });
-
-        console.log(
-          "[orders] Total orders in store:",
-          Object.keys(orders.value).length,
-        );
-        console.log("[orders] currentMonth.value:", currentMonth.value);
-
         loading.value = false;
       },
       (err) => {

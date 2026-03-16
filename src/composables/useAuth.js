@@ -52,7 +52,6 @@ export function useAuth() {
             const tokenResult = await getIdTokenResult(user);
             // Attach custom claims to user object for easy access
             user.customClaims = tokenResult.claims;
-            console.log("[useAuth] Custom claims loaded:", tokenResult.claims);
           } catch (err) {
             console.error("[useAuth] Failed to get custom claims:", err);
             user.customClaims = {};

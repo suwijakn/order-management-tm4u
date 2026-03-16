@@ -314,7 +314,7 @@ async function clearColumnData() {
     deletingColumnDataCount.value = await columnsStore.getColumnDataCount(
       deletingColumn.value.key,
     );
-    console.log(`Cleared ${clearedCount} records`);
+    // Data cleared successfully
   } catch (error) {
     console.error("Failed to clear column data:", error);
   } finally {

@@ -171,7 +171,6 @@ export const usePendingsStore = defineStore("pendings", () => {
 
     // Don't fetch if user is not authenticated yet
     if (!authStore.isAuthenticated || !authStore.user?.uid) {
-      console.log("[pendings] User not authenticated, skipping fetchAll");
       return;
     }
 
@@ -219,15 +218,6 @@ export const usePendingsStore = defineStore("pendings", () => {
     const authStore = useAuthStore();
     error.value = null;
 
-    console.log(
-      "[pendings] Creating pending (uniqueness enforced by Firestore rules):",
-      {
-        targetId,
-        field,
-        targetCollection,
-      },
-    );
-
     // Cost pendings require Manager+ (T-AUTHZ-005)
     if (
       targetCollection === "costs" &&
@@ -247,22 +237,14 @@ export const usePendingsStore = defineStore("pendings", () => {
     const sanitizedField = field.replace(/[^a-zA-Z0-9]/g, "_");
     const pendingDocId = `${targetId}_${sanitizedField}`;
 
-    console.log("[pendings] Using deterministic document ID:", pendingDocId);
-
     try {
       const docRef = doc(db, "pending_changes", pendingDocId);
 
       // Check if document already exists
-      console.log("[pendings] Checking if document exists:", pendingDocId);
       let existingDoc = null;
       try {
         existingDoc = await getDoc(docRef);
-        console.log("[pendings] Document exists check:", existingDoc.exists());
       } catch (readErr) {
-        console.warn(
-          "[pendings] Could not read existing doc:",
-          readErr.message,
-        );
         // Continue - document might not exist
       }
 
@@ -300,22 +282,9 @@ export const usePendingsStore = defineStore("pendings", () => {
         expiresAt,
       };
 
-      console.log("[pendings] Attempting to create pending with data:", {
-        ...pendingData,
-        requestedAt: "serverTimestamp()",
-        expiresAt: expiresAt.toDate(),
-      });
-      console.log("[pendings] User info:", {
-        uid: authStore.user.uid,
-        email: authStore.userEmail,
-        role: authStore.userRole,
-      });
-
       // Use setDoc with the deterministic ID
-      console.log("[pendings] Calling setDoc...");
       try {
         await setDoc(docRef, pendingData);
-        console.log("[pendings] Successfully created pending:", docRef.id);
 
         // Audit log
         await logPendingAction(AuditAction.PENDING_CREATE, docRef.id, {
@@ -380,13 +349,6 @@ export const usePendingsStore = defineStore("pendings", () => {
         const currentVersion =
           order?.version || pendingSnapshot.baseVersion || 1;
 
-        console.log("[pendings] Applying approved value:", {
-          orderId: pendingSnapshot.targetId,
-          field,
-          newValue: pendingSnapshot.newValue,
-          currentVersion,
-        });
-
         await updateDoc(doc(db, "orders", pendingSnapshot.targetId), {
           [`dynamic_fields.${field}`]: pendingSnapshot.newValue,
           version: currentVersion + 1,
@@ -402,8 +364,6 @@ export const usePendingsStore = defineStore("pendings", () => {
         statusUpdatedAt: serverTimestamp(),
       });
 
-      console.log("[pendings] Pending approved and value applied:", pendingId);
-
       // Audit log
       await logPendingAction(AuditAction.PENDING_APPROVE, pendingId, {
         targetCollection: pendingSnapshot.targetCollection,
@@ -418,12 +378,8 @@ export const usePendingsStore = defineStore("pendings", () => {
       // remove it from the UI when status changes in step 2.
       try {
         await deleteDoc(doc(db, "pending_changes", pendingId));
-        console.log("[pendings] Cleaned up approved pending doc:", pendingId);
       } catch (cleanupErr) {
-        console.warn(
-          "[pendings] Cleanup of approved pending failed:",
-          cleanupErr.message,
-        );
+        // Cleanup failed - document will remain but status is updated
       }
     } catch (err) {
       handleError(err);
@@ -463,8 +419,6 @@ export const usePendingsStore = defineStore("pendings", () => {
         rejectionCount: currentRejectionCount + 1,
       });
 
-      console.log("[pendings] Pending rejected:", pendingId);
-
       // Audit log
       await logPendingAction(AuditAction.PENDING_REJECT, pendingId, {
         rejectionComment: comment,
@@ -476,12 +430,8 @@ export const usePendingsStore = defineStore("pendings", () => {
       // remove it from the UI when status changes in step 1.
       try {
         await deleteDoc(doc(db, "pending_changes", pendingId));
-        console.log("[pendings] Cleaned up rejected pending doc:", pendingId);
       } catch (cleanupErr) {
-        console.warn(
-          "[pendings] Cleanup of rejected pending failed:",
-          cleanupErr.message,
-        );
+        // Cleanup failed - document will remain but status is updated
       }
     } catch (err) {
       handleError(err);

@@ -25,21 +25,12 @@ const allowedRoles = ["super_admin", "manager", "jr_sales", "sr_sales"];
 // Computed property to check if user is authorized
 const isAuthorized = computed(() => {
   if (!authStore.isAuthenticated) return false;
-
   const userRole = authStore.userRole;
-
-  console.log("[Dashboard] Authorization check:", {
-    userRole,
-    allowedRoles,
-    isAuthorized: userRole && allowedRoles.includes(userRole),
-  });
-
   return userRole && allowedRoles.includes(userRole);
 });
 
 // Watch for month changes and refetch orders
 watch(selectedMonth, (newMonth) => {
-  console.log("[Dashboard] Month changed to:", newMonth);
   ordersStore.fetchOrders(newMonth);
 });
 
@@ -156,13 +147,7 @@ function getPendingForField(orderId, fieldKey) {
 
 // Check if a field has a pending change
 function hasPendingChange(orderId, fieldKey) {
-  const result = !!getPendingForField(orderId, fieldKey);
-  if (pendingsStore.allPendingItems.length > 0) {
-    console.log(
-      `[Dashboard] hasPendingChange(${orderId}, ${fieldKey}) = ${result}`,
-    );
-  }
-  return result;
+  return !!getPendingForField(orderId, fieldKey);
 }
 
 // Format date for tooltip display
@@ -192,43 +177,24 @@ function isTooltipVisible(orderId, fieldKey) {
 
 // Event handlers for SpreadsheetGrid
 function handleOrderUpdated(payload) {
-  console.log("[Dashboard] Order updated:", payload);
+  // Order updated event
 }
 
 function handleOrderCreated(payload) {
-  console.log("[Dashboard] Order created:", payload);
+  // Order created event
 }
 
 function handleOrderDeleted(payload) {
-  console.log("[Dashboard] Order deleted:", payload);
+  // Order deleted event
 }
 
 onMounted(() => {
-  console.log(
-    "[Dashboard] Mounting, fetching orders for:",
-    selectedMonth.value,
-  );
-  console.log("[Dashboard] Current user role:", authStore.userRole);
-
   // Fetch column definitions and role permissions
   columnsStore.fetchColumns();
   ordersStore.fetchOrders(selectedMonth.value);
 
   // Fetch all pending changes for field indicators
-  console.log("[Dashboard] Fetching all pending changes...");
   pendingsStore.fetchAllPendings();
-
-  // Debug: Log pending changes after a delay
-  setTimeout(() => {
-    console.log(
-      "[Dashboard] All pending items:",
-      pendingsStore.allPendingItems,
-    );
-    console.log(
-      "[Dashboard] Pending count:",
-      pendingsStore.allPendingItems.length,
-    );
-  }, 2000);
 });
 
 onUnmounted(() => {

@@ -11,7 +11,6 @@ import PendingReviewView from "@/views/PendingReviewView.vue";
 import DeletedOrdersView from "@/views/DeletedOrdersView.vue";
 import ColumnManagementView from "@/views/ColumnManagementView.vue";
 import AuditLogView from "@/views/AuditLogView.vue";
-import TestOrderCreate from "@/views/TestOrderCreate.vue";
 import ModernDashboardLayout from "@/layouts/ModernDashboardLayout.vue";
 
 const routes = [
@@ -38,12 +37,6 @@ const routes = [
     name: "EmailVerification",
     component: EmailVerificationView,
     meta: { requiresAuth: true, requiresEmailVerification: false },
-  },
-  {
-    path: "/test-order-create",
-    name: "TestOrderCreate",
-    component: TestOrderCreate,
-    meta: { requiresAuth: true, requiresEmailVerification: true },
   },
   {
     path: "/",

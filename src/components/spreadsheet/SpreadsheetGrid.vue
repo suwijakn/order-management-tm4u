@@ -248,7 +248,7 @@ watch(
       try {
         costsStore.fetchCosts(newMonth);
       } catch (err) {
-        console.log("[SpreadsheetGrid] Costs fetch skipped:", err.message);
+        // Costs fetch skipped - user may not have permission
       }
     }
   },

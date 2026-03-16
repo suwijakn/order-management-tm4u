@@ -123,33 +123,16 @@ export const useCostsStore = defineStore("costs", () => {
     unsubscribeListener = onSnapshot(
       q,
       (snapshot) => {
-        console.log("[costs] Snapshot received:", {
-          size: snapshot.size,
-          docChanges: snapshot.docChanges().length,
-          currentMonth: month,
-        });
-
         snapshot.docChanges().forEach((change) => {
-          console.log("[costs] Doc change:", {
-            type: change.type,
-            id: change.doc.id,
-            data: change.doc.data(),
-            month: change.doc.data()?.month,
-          });
-
           if (change.type === "added" || change.type === "modified") {
             costs.value.set(change.doc.id, {
               id: change.doc.id,
               ...convertTimestamps(change.doc.data()),
             });
-            console.log("[costs] Cost added/updated:", change.doc.id);
           } else if (change.type === "removed") {
             costs.value.delete(change.doc.id);
-            console.log("[costs] Cost removed:", change.doc.id);
           }
         });
-
-        console.log("[costs] Total costs in store:", costs.value.size);
         loading.value = false;
       },
       (err) => {
@@ -173,10 +156,6 @@ export const useCostsStore = defineStore("costs", () => {
     error.value = null;
 
     try {
-      console.log("[costs] Creating cost with data:", costData);
-      console.log("[costs] Using month from costData:", costData.month);
-      console.log("[costs] currentMonth.value:", currentMonth.value);
-
       const docRef = await addDoc(collection(db, "costs"), {
         ...costData,
         month: costData.month, // Use the month from costData, not currentMonth
@@ -189,9 +168,6 @@ export const useCostsStore = defineStore("costs", () => {
         deletedAt: null,
         deletedBy: null,
       });
-
-      console.log("[costs] Cost created with ID:", docRef.id);
-      console.log("[costs] Cost document written to Firestore");
 
       // Add audit log
       await logCostAction(AuditAction.COST_CREATE, docRef.id, {
