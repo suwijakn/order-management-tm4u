@@ -12,6 +12,7 @@ import {
   getIdTokenResult,
 } from "firebase/auth";
 import { auth } from "@/services/firebase";
+import { handleError } from "@/utils/errorHandler";
 
 // Shared reactive state across all component instances
 const currentUser = ref(null);
@@ -276,8 +277,8 @@ export function useAuth() {
       return userCredential.user;
     } catch (err) {
       recordFailedAttempt();
-      error.value = getAuthErrorMessage(err.code);
-      throw err;
+      error.value = handleError(err, "auth.login");
+      throw new Error(error.value);
     } finally {
       loading.value = false;
     }
@@ -304,8 +305,8 @@ export function useAuth() {
 
       return userCredential.user;
     } catch (err) {
-      error.value = getAuthErrorMessage(err.code);
-      throw err;
+      error.value = handleError(err, "auth.register");
+      throw new Error(error.value);
     } finally {
       loading.value = false;
     }
@@ -319,29 +320,11 @@ export function useAuth() {
       clearSessionInfo();
       await signOut(auth);
     } catch (err) {
-      error.value = getAuthErrorMessage(err.code);
-      throw err;
+      error.value = handleError(err, "auth.logout");
+      throw new Error(error.value);
     } finally {
       loading.value = false;
     }
-  }
-
-  // Map Firebase error codes to user-friendly messages
-  function getAuthErrorMessage(errorCode) {
-    const errorMessages = {
-      "auth/invalid-email": "Invalid email address format.",
-      "auth/user-disabled": "This account has been disabled.",
-      "auth/user-not-found": "No account found with this email.",
-      "auth/wrong-password": "Incorrect password.",
-      "auth/invalid-credential": "Invalid email or password.",
-      "auth/email-already-in-use": "An account already exists with this email.",
-      "auth/weak-password": "Password should be at least 6 characters.",
-      "auth/too-many-requests":
-        "Too many failed attempts. Please try again later.",
-      "auth/network-request-failed":
-        "Network error. Please check your connection.",
-    };
-    return errorMessages[errorCode] || "An authentication error occurred.";
   }
 
   // Initialize auth listener on first use
