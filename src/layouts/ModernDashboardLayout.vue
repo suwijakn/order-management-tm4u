@@ -107,7 +107,7 @@ const navigationItems = computed(() => [
   },
   {
     name: "Columns",
-    route: "/manage-columns",
+    route: "/column-management",
     visible: isSuperAdmin.value,
     icon: "⚙️",
   },

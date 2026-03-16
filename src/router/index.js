@@ -9,6 +9,7 @@ import DashboardView from "@/views/DashboardView.vue";
 import EmailVerificationView from "@/views/EmailVerificationView.vue";
 import PendingReviewView from "@/views/PendingReviewView.vue";
 import DeletedOrdersView from "@/views/DeletedOrdersView.vue";
+import ColumnManagementView from "@/views/ColumnManagementView.vue";
 import TestOrderCreate from "@/views/TestOrderCreate.vue";
 import ModernDashboardLayout from "@/layouts/ModernDashboardLayout.vue";
 
@@ -63,6 +64,12 @@ const routes = [
         path: "deleted-orders",
         name: "DeletedOrders",
         component: DeletedOrdersView,
+      },
+      {
+        path: "column-management",
+        name: "ColumnManagement",
+        component: ColumnManagementView,
+        meta: { requiresSuperAdmin: true },
       },
     ],
   },

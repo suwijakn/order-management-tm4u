@@ -216,9 +216,12 @@ service cloud.firestore {
                     // updatedAt must be a server timestamp
                     && incomingData().updatedAt == request.time;
 
-      // Hard delete is NEVER allowed from client (T-DATA-009)
-      // Permanent deletion should only happen via Cloud Functions after 30 days
-      allow delete: if false;
+      // Hard delete: Only Super Admin can permanently delete soft-deleted orders (T-DATA-009)
+      // Must be already soft-deleted (deletedAt is set)
+      // Permanent deletion should normally happen via Cloud Functions after 30 days,
+      // but Super Admin can manually trigger it via UI for immediate cleanup
+      allow delete: if isSuperAdmin()
+                    && existingData().deletedAt != null;
     }
 
 
@@ -385,11 +388,12 @@ service cloud.firestore {
       // Rules enforce: if isDataRelated=true, type CANNOT be changed.
       allow update: if isSuperAdmin()
                     && incomingData().updatedAt == request.time
-                    // Key is immutable
-                    && incomingData().key == existingData().key
+                    // Key is immutable (if present in existing doc)
+                    && (!('key' in existingData()) || incomingData().key == existingData().key)
                     // T-DATA-005: If column is data-related, type cannot change
                     && (
-                      !existingData().isDataRelated
+                      !('isDataRelated' in existingData())
+                      || !existingData().isDataRelated
                       || !fieldChanged('type')
                     )
                     // systemField cannot be changed
